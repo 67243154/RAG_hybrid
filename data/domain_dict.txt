@@ -1,0 +1,31 @@
+星辰科技 10 nz
+弹性办公 10 n
+六险一金 10 n
+补充商业医疗保险 10 n
+购物卡 5 n
+部门负责人 5 n
+绩效降档 5 n
+大模型应用开发 20 nz
+AI Agent 20 nz
+智能体 20 n
+Rerank 10 nz
+RRF 10 nz
+LangGraph 10 nz
+function calling 10 nz
+模拟面试 10 n
+剑指 Offer 10 nz
+Hot 100 10 nz
+八股 10 n
+牛客 10 nz智能客服平台 10 nz
+工单系统 10 n
+智能机器人 10 n
+私有化部署 10 n
+单点登录 5 n
+质检 5 n
+转人工 5 n
+坐席 5 n
+并发会话 5 n
+故障申报热线 5 n
+自动升级 5 n
+发布审核 5 n
+版本管理 5 n
