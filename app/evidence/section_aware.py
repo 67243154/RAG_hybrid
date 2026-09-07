@@ -18,6 +18,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 
 from app.llm.citation_location import location_for
+from app.ingestion.tokenizer import token_count, token_offsets
 from app.retrieval.hybrid_search import SearchResult
 from app.security.models import RetrievalContext
 
@@ -81,12 +82,31 @@ class SectionAwareEvidenceBuilder:
         collection_name: str,
         *,
         token_budget: int = 1200,
+        tokenizer_model: str | None = None,
+        tokenizer_revision: str = "main",
     ) -> None:
         if token_budget <= 0:
             raise ValueError("token_budget must be positive")
         self._client = client
         self._collection_name = collection_name
         self._token_budget = token_budget
+        self._tokenizer_model = tokenizer_model
+        self._tokenizer_revision = tokenizer_revision
+        self._tokenizer_unavailable = False
+
+    def _count_tokens(self, text: str) -> int:
+        """Count tokens with the configured model, falling back for tests/legacy callers."""
+        tokenizer_model = getattr(self, "_tokenizer_model", None)
+        tokenizer_revision = getattr(self, "_tokenizer_revision", "main")
+        if tokenizer_model and not getattr(self, "_tokenizer_unavailable", False):
+            try:
+                return token_count(text, tokenizer_model, tokenizer_revision)
+            except Exception:
+                # A missing local tokenizer must not turn a valid retrieval into
+                # a 500.  The whitespace estimate remains a safe lower-fidelity
+                # fallback for environments that do not have model files yet.
+                self._tokenizer_unavailable = True
+        return _estimate_tokens(text)
 
     def _scroll_source(self, anchor: SearchResult, context: RetrievalContext) -> list[SearchResult]:
         payload = anchor.payload
@@ -193,6 +213,31 @@ class SectionAwareEvidenceBuilder:
         block.payload["visible_token_count"] = len(visible_words)
         return block
 
+    def _truncate_for_budget(self, block: SearchResult, token_limit: int) -> SearchResult:
+        """Truncate at real tokenizer character offsets when available."""
+        text = str(block.payload.get("text", ""))
+        tokenizer_model = getattr(self, "_tokenizer_model", None)
+        tokenizer_revision = getattr(self, "_tokenizer_revision", "main")
+        if not tokenizer_model or getattr(self, "_tokenizer_unavailable", False):
+            return self._truncate_block(block, token_limit)
+        try:
+            offsets = token_offsets(text, tokenizer_model, tokenizer_revision)
+            original_count = len(offsets)
+            visible_count = min(max(0, token_limit), original_count)
+            if visible_count:
+                visible_text = text[: offsets[visible_count - 1][1]].strip()
+            else:
+                visible_text = ""
+            block.payload["text"] = visible_text
+            block.payload["token_count"] = visible_count
+            block.payload["truncated"] = True
+            block.payload["original_token_count"] = original_count
+            block.payload["visible_token_count"] = visible_count
+            return block
+        except Exception:
+            self._tokenizer_unavailable = True
+            return self._truncate_block(block, token_limit)
+
     @staticmethod
     def _block(anchor: SearchResult, section_chunks: list[SearchResult]) -> SearchResult:
         ordered = sorted(section_chunks, key=_sort_key)
@@ -286,8 +331,12 @@ class SectionAwareEvidenceBuilder:
         full_anchor_blocks = [
             self._block(group["anchor"], group["selected"]) for group in groups
         ]
+        for block in full_anchor_blocks:
+            block.payload["token_count"] = self._count_tokens(
+                str(block.payload.get("text", ""))
+            )
         full_anchor_sizes = [
-            _estimate_tokens(str(block.payload.get("text", "")))
+            self._count_tokens(str(block.payload.get("text", "")))
             for block in full_anchor_blocks
         ]
         allocations = list(full_anchor_sizes)
@@ -321,7 +370,7 @@ class SectionAwareEvidenceBuilder:
             if allocation <= 0:
                 continue
             if full_size > allocation:
-                self._truncate_block(block, allocation)
+                self._truncate_for_budget(block, allocation)
                 truncated_count += 1
             output_index_by_group[id(group)] = len(output)
             output.append(block)
@@ -353,10 +402,13 @@ class SectionAwareEvidenceBuilder:
                     continue
                 trial_chunks = current_chunks + [candidate]
                 trial_block = self._block(group["anchor"], trial_chunks)
+                trial_block.payload["token_count"] = self._count_tokens(
+                    str(trial_block.payload.get("text", ""))
+                )
                 trial_output = list(output)
                 trial_output[output_index] = trial_block
                 trial_tokens = sum(
-                    _estimate_tokens(str(item.payload.get("text", "")))
+                    self._count_tokens(str(item.payload.get("text", "")))
                     for item in trial_output
                 )
                 if trial_tokens <= self._token_budget:
@@ -371,8 +423,12 @@ class SectionAwareEvidenceBuilder:
             group["selected"] = current_chunks
 
         context_tokens = sum(
-            _estimate_tokens(str(block.payload.get("text", ""))) for block in output
+            self._count_tokens(str(block.payload.get("text", ""))) for block in output
         )
+        for block in output:
+            block.payload["token_count"] = self._count_tokens(
+                str(block.payload.get("text", ""))
+            )
         for index, block in enumerate(output, 1):
             block.payload["evidence_id"] = f"E{index}"
         return EvidenceBuildResult(

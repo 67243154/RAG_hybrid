@@ -135,9 +135,14 @@ async def ingest_path(
                     span.set_attribute("embed.chunk_count", len(batch))
                     span.set_attribute("embed.concurrency", embedding_concurrency)
                     dense_vectors = await embed_texts_concurrently(
-                        [chunk.text for chunk in batch], embed_fn, embedding_concurrency
+                        [chunk.retrieval_text or chunk.text for chunk in batch],
+                        embed_fn,
+                        embedding_concurrency,
                     )
-                    sparse_vectors = [sparse_encoder.embed_document(chunk.text) for chunk in batch]
+                    sparse_vectors = [
+                        sparse_encoder.embed_document(chunk.retrieval_text or chunk.text)
+                        for chunk in batch
+                    ]
 
                 with tracer.start_as_current_span("upsert_batch") as span:
                     span.set_attribute("upsert.chunk_count", len(batch))
@@ -456,10 +461,15 @@ async def ingest_connector(
                             span.set_attribute("embed.chunk_count", len(batch))
                             span.set_attribute("embed.concurrency", embedding_concurrency)
                             dense_vectors = await embed_texts_concurrently(
-                                [chunk.text for chunk in batch], embed_fn, embedding_concurrency
+                                [chunk.retrieval_text or chunk.text for chunk in batch],
+                                embed_fn,
+                                embedding_concurrency,
                             )
                             sparse_vectors = [
-                                sparse_encoder.embed_document(chunk.text) for chunk in batch
+                                sparse_encoder.embed_document(
+                                    chunk.retrieval_text or chunk.text
+                                )
+                                for chunk in batch
                             ]
 
                         with tracer.start_as_current_span("upsert_batch") as span:

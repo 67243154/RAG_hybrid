@@ -43,6 +43,9 @@ class PipelineFingerprint:
     overlap_tokens: int = 50
     hard_max_tokens: int | None = None
     boundary_strategy: str = "legacy_word_sentence_heading_page_v1"
+    # Parser semantics are part of the vector contract: changing PDF heading
+    # reconstruction must trigger a fresh index even when file bytes match.
+    parser_version: str = "pdf_heading_v1"
 
     def canonical(self) -> str:
         # sort_keys=True is what makes this deterministic across
@@ -75,4 +78,5 @@ def build_pipeline_fingerprint(
         overlap_tokens=chunking.overlap_tokens,
         hard_max_tokens=chunking.hard_max_tokens,
         boundary_strategy=chunking.boundary_strategy,
+        parser_version="pdf_heading_v1",
     )

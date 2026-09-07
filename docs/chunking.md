@@ -5,8 +5,10 @@
 The production baseline remains the legacy whitespace-word window: target
 500, overlap 50, sentence-end extension, Markdown heading/block grouping, and
 PDF page boundaries. Its “token” count is an approximation and is not a model
-tokenizer count. Markdown citations use heading paths and occurrence numbers;
-PDF citations retain page and paragraph metadata.
+tokenizer count. PDF parsing now also reconstructs conservative heading paths
+from numbered headings and typography; uncertain PDFs still fall back to page
+and paragraph metadata. Markdown and structured PDF citations use heading paths
+and occurrence numbers.
 
 ## Tokenizer-aware design
 
@@ -16,14 +18,17 @@ tokenizer loading contract and multilingual scope: <https://huggingface.co/Qwen/
 
 `ChunkingConfig` is the single source of truth for target, overlap, hard max,
 tokenizer, revision, and boundary strategy. The token-aware chunker counts
-real tokenizer offsets, prefers sentence/paragraph boundaries, retains
-Markdown heading metadata, and starts a new PDF chunk at every page. The
+real tokenizer offsets, prefers sentence/paragraph boundaries, retains Markdown
+and PDF heading metadata, and starts a new PDF section at every detected
+heading while preserving page boundaries for chunking. The
 pre-committed hard-max rule is `target + 64`: 320, 448, 576, and 832 tokens.
 The hard max is never exceeded in the benchmarked candidates.
 
-The full pipeline fingerprint includes all chunking fields. Changing target,
-overlap, tokenizer revision, hard max, boundary strategy, or parser/index schema
-makes an unchanged document stale and requires re-indexing.
+Each indexed chunk keeps clean evidence text plus a heading-enriched retrieval
+text for dense and BM25 indexing. The full pipeline fingerprint includes all
+chunking fields and a PDF parser version. Changing target, overlap, tokenizer
+revision, hard max, boundary strategy, parser version, or index schema makes an
+unchanged document stale and requires re-indexing.
 
 ## Benchmark controls
 
@@ -119,6 +124,9 @@ the legacy baseline does not carry equivalent structural flags.
   boundary in the async retrieval path; ranking semantics remain unchanged.
 - The benchmark measures retrieval/candidate and context efficiency, not
   claim-level semantic grounding or answer relevancy.
+- PDF heading reconstruction is heuristic and depends on an extractable text
+  layer. Complex tables, scanned pages, decorative layouts, and unusual fonts
+  may still require OCR or a document-specific parser.
 - No production migration was performed because KEEP_CURRENT won the
   pre-committed Pareto decision rule.
 - A 26-request real local generation sanity subset was run after the benchmark,

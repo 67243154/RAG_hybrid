@@ -58,3 +58,14 @@ class Chunk:
     sentence_split: bool | None = None
     heading_preserved: bool | None = None
     page_crossing: bool | None = None
+
+    @property
+    def retrieval_text(self) -> str:
+        """Return index text with headings while keeping evidence text clean."""
+        if self.heading_path:
+            body = self.text.strip()
+            heading = self.heading_path[-1].strip()
+            if body.startswith(heading):
+                body = body[len(heading) :].lstrip()
+            return f"{' > '.join(self.heading_path)}\n\n{body}".strip()
+        return self.text

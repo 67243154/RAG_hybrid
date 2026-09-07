@@ -54,3 +54,17 @@ def sample_pdf(tmp_path) -> str:
     doc.save(pdf_path)
     doc.close()
     return str(pdf_path)
+
+
+@pytest.fixture
+def structured_pdf(tmp_path) -> str:
+    """A text PDF with numbered headings and a short body section."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((50, 70), "1. General Rules", fontsize=18)
+    page.insert_text((50, 120), "1.1. Vision", fontsize=14)
+    page.insert_text((50, 160), "An open and reliable service platform.", fontsize=11)
+    path = tmp_path / "structured.pdf"
+    doc.save(path)
+    doc.close()
+    return str(path)

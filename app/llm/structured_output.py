@@ -465,7 +465,15 @@ def parse_support_unit_state_machine_answer(raw: str) -> SupportUnitAnswer:
     value = json.loads(_strip_json_fence(raw))
     if not isinstance(value, dict) or set(value) != {"result"}:
         raise ValueError("invalid support-unit state wrapper")
-    return parse_support_unit_answer(json.dumps(value["result"], ensure_ascii=False))
+    result = value["result"]
+    if (
+        isinstance(result, dict)
+        and set(result) == {"answer_parts"}
+        and isinstance(result.get("answer_parts"), list)
+        and result["answer_parts"]
+    ):
+        result = {**result, "abstain": False}
+    return parse_support_unit_answer(json.dumps(result, ensure_ascii=False))
 
 
 def parse_support_unit_answer(raw: str) -> SupportUnitAnswer:

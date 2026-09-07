@@ -128,6 +128,15 @@ def test_chunk_document_pdf_chunks_have_empty_heading_path(sample_pdf):
     assert all(chunk.heading_path == () for chunk in chunks)
 
 
+def test_chunk_document_preserves_pdf_heading_path_and_retrieval_text(structured_pdf):
+    chunks = chunk_document(structured_pdf, source_id="structured", chunk_size_tokens=20)
+
+    section_chunks = [chunk for chunk in chunks if chunk.heading_path]
+    assert section_chunks
+    assert section_chunks[-1].heading_path == ("1. General Rules", "1.1. Vision")
+    assert "1.1. Vision" in section_chunks[-1].retrieval_text
+
+
 def test_chunk_document_accepts_an_explicit_doc_id_override(sample_pdf):
     chunks = chunk_document(
         sample_pdf,

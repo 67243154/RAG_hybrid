@@ -29,3 +29,13 @@ def test_page_with_no_text_layer_is_skipped(sample_pdf):
     paragraphs = extract_paragraphs(sample_pdf)
 
     assert all(p.page_number != 4 for p in paragraphs)
+
+
+def test_reconstructs_numbered_heading_path(structured_pdf):
+    paragraphs = extract_paragraphs(structured_pdf)
+
+    assert paragraphs[0].heading_path == ("1. General Rules",)
+    assert paragraphs[1].heading_path == ("1. General Rules", "1.1. Vision")
+    assert paragraphs[2].heading_path == ("1. General Rules", "1.1. Vision")
+    assert paragraphs[0].is_heading is True
+    assert paragraphs[2].is_heading is False

@@ -219,3 +219,26 @@ async def test_invalid_first_response_is_retried_with_state_machine_schema() -> 
     assert [event["content"] for event in events if event["type"] == "token"] == [
         "成为全球最开放、最创新、最可靠的制药服务平台。 [E1.S1]"
     ]
+
+
+def test_state_machine_wrapper_infers_nonempty_answer_as_non_abstain() -> None:
+    parsed = parse_support_unit_state_machine_answer(
+        json.dumps(
+            {
+                "result": {
+                    "answer_parts": [
+                        {"text": "14 days", "support_ids": ["E1.S1"]}
+                    ]
+                }
+            }
+        )
+    )
+    assert parsed.abstain is False
+    assert parsed.answer_parts[0].support_ids == ["E1.S1"]
+
+
+def test_state_machine_wrapper_rejects_empty_answer_without_abstain() -> None:
+    with pytest.raises(ValueError, match="invalid support-unit answer fields"):
+        parse_support_unit_state_machine_answer(
+            json.dumps({"result": {"answer_parts": []}})
+        )

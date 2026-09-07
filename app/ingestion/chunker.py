@@ -78,6 +78,8 @@ class ChunkSpan:
     sentence_split: bool | None = None
     heading_preserved: bool | None = None
     page_crossing: bool | None = None
+    heading_path: tuple[str, ...] = ()
+    heading_occurrence: int = 0
 
 
 def _sentence_end_positions(text: str, start: int, end: int) -> list[int]:
@@ -92,6 +94,8 @@ def _token_aware_spans(
     page_number: int,
     config: ChunkingConfig,
     heading_preserved: bool | None = None,
+    heading_path: tuple[str, ...] = (),
+    heading_occurrence: int = 0,
 ) -> list[ChunkSpan]:
     """Split one page/heading section using real tokenizer offsets.
 
@@ -154,6 +158,8 @@ def _token_aware_spans(
                     sentence_split=sentence_split,
                     heading_preserved=heading_preserved,
                     page_crossing=False,
+                    heading_path=heading_path,
+                    heading_occurrence=heading_occurrence,
                 )
             )
         if end_token >= len(tokenizer_offsets):
@@ -171,6 +177,8 @@ def _chunk_page_text(
     page_number: int,
     chunk_size_tokens: int,
     overlap_tokens: int,
+    heading_path: tuple[str, ...] = (),
+    heading_occurrence: int = 0,
 ) -> list[ChunkSpan]:
     words = list(re.finditer(r"\S+", page_text))
     if not words:
@@ -195,6 +203,8 @@ def _chunk_page_text(
                     paragraph_index=paragraph_index,
                     char_range=(start_char, end_char),
                     text=text,
+                    heading_path=heading_path,
+                    heading_occurrence=heading_occurrence,
                 )
             )
 
@@ -223,13 +233,36 @@ def chunk_document(
 
     spans: list[ChunkSpan] = []
     for page_number, page_paragraphs in paragraphs_by_page.items():
-        page_text, offsets = _build_page_text(page_paragraphs)
-        if chunking_config is not None and chunking_config.token_aware:
-            spans.extend(_token_aware_spans(page_text, offsets, page_number, chunking_config))
-        else:
-            spans.extend(
-                _chunk_page_text(page_text, offsets, page_number, chunk_size_tokens, overlap_tokens)
-            )
+        sections: dict[tuple[tuple[str, ...], int], list[Paragraph]] = {}
+        for paragraph in page_paragraphs:
+            key = (paragraph.heading_path, paragraph.heading_occurrence)
+            sections.setdefault(key, []).append(paragraph)
+        for (heading_path, heading_occurrence), section_paragraphs in sections.items():
+            page_text, offsets = _build_page_text(section_paragraphs)
+            if chunking_config is not None and chunking_config.token_aware:
+                spans.extend(
+                    _token_aware_spans(
+                        page_text,
+                        offsets,
+                        page_number,
+                        chunking_config,
+                        heading_preserved=bool(heading_path),
+                        heading_path=heading_path,
+                        heading_occurrence=heading_occurrence,
+                    )
+                )
+            else:
+                spans.extend(
+                    _chunk_page_text(
+                        page_text,
+                        offsets,
+                        page_number,
+                        chunk_size_tokens,
+                        overlap_tokens,
+                        heading_path=heading_path,
+                        heading_occurrence=heading_occurrence,
+                    )
+                )
 
     return [
         Chunk(
@@ -240,6 +273,8 @@ def chunk_document(
             paragraph_index=span.paragraph_index,
             char_range=span.char_range,
             text=span.text,
+            heading_path=span.heading_path,
+            heading_occurrence=span.heading_occurrence,
             document_version=doc_id,
             token_count=span.token_count,
             overlap_token_count=span.overlap_token_count,
