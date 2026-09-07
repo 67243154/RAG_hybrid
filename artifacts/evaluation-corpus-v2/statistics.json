@@ -1,0 +1,475 @@
+{
+  "schema_version": "evaluation-corpus-v2",
+  "source_of_truth": {
+    "manifest": "data/evaluation/evaluation-corpus-v2/corpus-manifest.json",
+    "dataset": "data/evaluation/evaluation-corpus-v2/golden-dataset-v2.json",
+    "pdf_sources": "data/evaluation/evaluation-corpus-v2/pdf-sources",
+    "artifacts_are_derived": true
+  },
+  "document_count": 20,
+  "markdown_count": 15,
+  "pdf_count": 5,
+  "document_language_counts": {
+    "tr": 7,
+    "en": 13
+  },
+  "document_tenant_counts": {
+    "tenant-a": 14,
+    "tenant-b": 6
+  },
+  "total_characters": 84242,
+  "total_words": 11930,
+  "document_word_percentiles": {
+    "p0": 90,
+    "p25": 115,
+    "p50": 152,
+    "p75": 452,
+    "p90": 2634,
+    "p100": 2742
+  },
+  "content_quality": {
+    "account-security": {
+      "substantive_paragraph_count": 2,
+      "exact_duplicate_ratio": 0.0,
+      "normalized_duplicate_ratio": 0.0,
+      "unique_substantive_paragraph_ratio": 1.0,
+      "repeated_long_ngram_count": 0,
+      "repeated_long_ngram_ratio": 0.0
+    },
+    "digital-goods-policy": {
+      "substantive_paragraph_count": 3,
+      "exact_duplicate_ratio": 0.0,
+      "normalized_duplicate_ratio": 0.0,
+      "unique_substantive_paragraph_ratio": 1.0,
+      "repeated_long_ngram_count": 0,
+      "repeated_long_ngram_ratio": 0.0
+    },
+    "employee-handbook-en": {
+      "substantive_paragraph_count": 60,
+      "exact_duplicate_ratio": 0.0,
+      "normalized_duplicate_ratio": 0.0,
+      "unique_substantive_paragraph_ratio": 1.0,
+      "repeated_long_ngram_count": 0,
+      "repeated_long_ngram_ratio": 0.0
+    },
+    "enterprise-contract-guide": {
+      "substantive_paragraph_count": 30,
+      "exact_duplicate_ratio": 0.0,
+      "normalized_duplicate_ratio": 0.0,
+      "unique_substantive_paragraph_ratio": 1.0,
+      "repeated_long_ngram_count": 0,
+      "repeated_long_ngram_ratio": 0.0
+    },
+    "injection-bearing-policy": {
+      "substantive_paragraph_count": 3,
+      "exact_duplicate_ratio": 0.0,
+      "normalized_duplicate_ratio": 0.0,
+      "unique_substantive_paragraph_ratio": 1.0,
+      "repeated_long_ngram_count": 0,
+      "repeated_long_ngram_ratio": 0.0
+    },
+    "long-policy-tr": {
+      "substantive_paragraph_count": 63,
+      "exact_duplicate_ratio": 0.0,
+      "normalized_duplicate_ratio": 0.0,
+      "unique_substantive_paragraph_ratio": 1.0,
+      "repeated_long_ngram_count": 0,
+      "repeated_long_ngram_ratio": 0.0
+    },
+    "marketplace-returns": {
+      "substantive_paragraph_count": 3,
+      "exact_duplicate_ratio": 0.0,
+      "normalized_duplicate_ratio": 0.0,
+      "unique_substantive_paragraph_ratio": 1.0,
+      "repeated_long_ngram_count": 0,
+      "repeated_long_ngram_ratio": 0.0
+    },
+    "premium-returns-2026": {
+      "substantive_paragraph_count": 3,
+      "exact_duplicate_ratio": 0.0,
+      "normalized_duplicate_ratio": 0.0,
+      "unique_substantive_paragraph_ratio": 1.0,
+      "repeated_long_ngram_count": 0,
+      "repeated_long_ngram_ratio": 0.0
+    },
+    "product-guide-en": {
+      "substantive_paragraph_count": 30,
+      "exact_duplicate_ratio": 0.0,
+      "normalized_duplicate_ratio": 0.0,
+      "unique_substantive_paragraph_ratio": 1.0,
+      "repeated_long_ngram_count": 0,
+      "repeated_long_ngram_ratio": 0.0
+    },
+    "refund-policy-2025": {
+      "substantive_paragraph_count": 2,
+      "exact_duplicate_ratio": 0.0,
+      "normalized_duplicate_ratio": 0.0,
+      "unique_substantive_paragraph_ratio": 1.0,
+      "repeated_long_ngram_count": 0,
+      "repeated_long_ngram_ratio": 0.0
+    },
+    "refund-policy-2026": {
+      "substantive_paragraph_count": 3,
+      "exact_duplicate_ratio": 0.0,
+      "normalized_duplicate_ratio": 0.0,
+      "unique_substantive_paragraph_ratio": 1.0,
+      "repeated_long_ngram_count": 0,
+      "repeated_long_ngram_ratio": 0.0
+    },
+    "regional-returns-eu": {
+      "substantive_paragraph_count": 16,
+      "exact_duplicate_ratio": 0.0,
+      "normalized_duplicate_ratio": 0.0,
+      "unique_substantive_paragraph_ratio": 1.0,
+      "repeated_long_ngram_count": 0,
+      "repeated_long_ngram_ratio": 0.0
+    },
+    "regional-returns-tr": {
+      "substantive_paragraph_count": 16,
+      "exact_duplicate_ratio": 0.0,
+      "normalized_duplicate_ratio": 0.0,
+      "unique_substantive_paragraph_ratio": 1.0,
+      "repeated_long_ngram_count": 0,
+      "repeated_long_ngram_ratio": 0.0
+    },
+    "returns-manual-tr": {
+      "substantive_paragraph_count": 23,
+      "exact_duplicate_ratio": 0.0,
+      "normalized_duplicate_ratio": 0.0,
+      "unique_substantive_paragraph_ratio": 1.0,
+      "repeated_long_ngram_count": 0,
+      "repeated_long_ngram_ratio": 0.0
+    },
+    "shipping-and-delivery": {
+      "substantive_paragraph_count": 3,
+      "exact_duplicate_ratio": 0.0,
+      "normalized_duplicate_ratio": 0.0,
+      "unique_substantive_paragraph_ratio": 1.0,
+      "repeated_long_ngram_count": 0,
+      "repeated_long_ngram_ratio": 0.0
+    },
+    "standard-returns-2026": {
+      "substantive_paragraph_count": 4,
+      "exact_duplicate_ratio": 0.0,
+      "normalized_duplicate_ratio": 0.0,
+      "unique_substantive_paragraph_ratio": 1.0,
+      "repeated_long_ngram_count": 0,
+      "repeated_long_ngram_ratio": 0.0
+    },
+    "subscription-billing": {
+      "substantive_paragraph_count": 3,
+      "exact_duplicate_ratio": 0.0,
+      "normalized_duplicate_ratio": 0.0,
+      "unique_substantive_paragraph_ratio": 1.0,
+      "repeated_long_ngram_count": 0,
+      "repeated_long_ngram_ratio": 0.0
+    },
+    "support-escalation": {
+      "substantive_paragraph_count": 3,
+      "exact_duplicate_ratio": 0.0,
+      "normalized_duplicate_ratio": 0.0,
+      "unique_substantive_paragraph_ratio": 1.0,
+      "repeated_long_ngram_count": 0,
+      "repeated_long_ngram_ratio": 0.0
+    },
+    "support-playbook": {
+      "substantive_paragraph_count": 56,
+      "exact_duplicate_ratio": 0.0,
+      "normalized_duplicate_ratio": 0.0,
+      "unique_substantive_paragraph_ratio": 1.0,
+      "repeated_long_ngram_count": 0,
+      "repeated_long_ngram_ratio": 0.0
+    },
+    "tenant-b-api-limits": {
+      "substantive_paragraph_count": 2,
+      "exact_duplicate_ratio": 0.0,
+      "normalized_duplicate_ratio": 0.0,
+      "unique_substantive_paragraph_ratio": 1.0,
+      "repeated_long_ngram_count": 0,
+      "repeated_long_ngram_ratio": 0.0
+    }
+  },
+  "question_count": 445,
+  "split_counts": {
+    "development": 200,
+    "calibration": 112,
+    "frozen_test": 133
+  },
+  "case_family_count": 112,
+  "category_counts": {
+    "acl_negative": 24,
+    "ambiguous": 24,
+    "cross_lingual": 80,
+    "hard_answerable": 109,
+    "injection_bearing": 20,
+    "multi_document": 24,
+    "standard_answerable": 80,
+    "unanswerable": 60,
+    "version_conflict": 24
+  },
+  "answerability_counts": {
+    "unanswerable": 84,
+    "ambiguous": 24,
+    "answerable": 337
+  },
+  "language_pair_counts": {
+    "en->none": 54,
+    "tr->none": 54,
+    "tr->en": 82,
+    "en->tr": 36,
+    "tr->tr": 66,
+    "en->en": 149,
+    "tr->mixed": 4
+  },
+  "answerable_language_pair_counts": {
+    "en->en": 149,
+    "en->tr": 36,
+    "tr->en": 82,
+    "tr->mixed": 4,
+    "tr->tr": 66
+  },
+  "query_language_counts": {
+    "en": 239,
+    "tr": 206
+  },
+  "non_answerable_query_language_counts": {
+    "en": 54,
+    "tr": 54
+  },
+  "split_cross_tabs": {
+    "answerability": {
+      "ambiguous": {
+        "development": 12,
+        "calibration": 6,
+        "frozen_test": 6
+      },
+      "answerable": {
+        "development": 150,
+        "calibration": 83,
+        "frozen_test": 104
+      },
+      "unanswerable": {
+        "development": 38,
+        "calibration": 23,
+        "frozen_test": 23
+      }
+    },
+    "primary_category": {
+      "acl_negative": {
+        "development": 8,
+        "calibration": 8,
+        "frozen_test": 8
+      },
+      "ambiguous": {
+        "development": 12,
+        "calibration": 6,
+        "frozen_test": 6
+      },
+      "cross_lingual": {
+        "development": 36,
+        "calibration": 20,
+        "frozen_test": 24
+      },
+      "hard_answerable": {
+        "development": 50,
+        "calibration": 27,
+        "frozen_test": 32
+      },
+      "injection_bearing": {
+        "development": 8,
+        "calibration": 4,
+        "frozen_test": 8
+      },
+      "multi_document": {
+        "development": 12,
+        "calibration": 4,
+        "frozen_test": 8
+      },
+      "standard_answerable": {
+        "development": 36,
+        "calibration": 20,
+        "frozen_test": 24
+      },
+      "unanswerable": {
+        "development": 30,
+        "calibration": 15,
+        "frozen_test": 15
+      },
+      "version_conflict": {
+        "development": 8,
+        "calibration": 8,
+        "frozen_test": 8
+      }
+    },
+    "query_language": {
+      "en": {
+        "development": 107,
+        "calibration": 61,
+        "frozen_test": 71
+      },
+      "tr": {
+        "development": 93,
+        "calibration": 51,
+        "frozen_test": 62
+      }
+    },
+    "tenant": {
+      "tenant-a": {
+        "development": 156,
+        "calibration": 88,
+        "frozen_test": 103
+      },
+      "tenant-b": {
+        "development": 44,
+        "calibration": 24,
+        "frozen_test": 30
+      }
+    },
+    "difficulty": {
+      "easy": {
+        "development": 36,
+        "calibration": 20,
+        "frozen_test": 24
+      },
+      "hard": {
+        "development": 164,
+        "calibration": 92,
+        "frozen_test": 109
+      }
+    }
+  },
+  "question_tenant_counts": {
+    "tenant-a": 347,
+    "tenant-b": 98
+  },
+  "fingerprints": {
+    "corpus_fingerprint": "0175aa4a2f9beca7e1a996bcf976dc715c8e6d94a55b76f181500c8c5b8a57b7",
+    "dataset_fingerprint": "17474079f2abf80154b3ba1bf1afbc09c13fa16e2f75c26cb4a99bd44518868f"
+  },
+  "inference_executed": false,
+  "chunking_stress_dry_run": {
+    "method": "whitespace proxy; no model tokenizer",
+    "counts_by_source": {
+      "account-security": {
+        "256": 1,
+        "384": 1,
+        "512": 1,
+        "768": 1
+      },
+      "digital-goods-policy": {
+        "256": 2,
+        "384": 2,
+        "512": 2,
+        "768": 2
+      },
+      "employee-handbook-en": {
+        "256": 37,
+        "384": 37,
+        "512": 37,
+        "768": 37
+      },
+      "enterprise-contract-guide": {
+        "256": 15,
+        "384": 15,
+        "512": 15,
+        "768": 15
+      },
+      "injection-bearing-policy": {
+        "256": 3,
+        "384": 3,
+        "512": 3,
+        "768": 3
+      },
+      "long-policy-tr": {
+        "256": 37,
+        "384": 37,
+        "512": 37,
+        "768": 37
+      },
+      "marketplace-returns": {
+        "256": 2,
+        "384": 2,
+        "512": 2,
+        "768": 2
+      },
+      "premium-returns-2026": {
+        "256": 2,
+        "384": 2,
+        "512": 2,
+        "768": 2
+      },
+      "product-guide-en": {
+        "256": 15,
+        "384": 15,
+        "512": 15,
+        "768": 15
+      },
+      "refund-policy-2025": {
+        "256": 1,
+        "384": 1,
+        "512": 1,
+        "768": 1
+      },
+      "refund-policy-2026": {
+        "256": 1,
+        "384": 1,
+        "512": 1,
+        "768": 1
+      },
+      "regional-returns-eu": {
+        "256": 8,
+        "384": 8,
+        "512": 8,
+        "768": 8
+      },
+      "regional-returns-tr": {
+        "256": 8,
+        "384": 8,
+        "512": 8,
+        "768": 8
+      },
+      "returns-manual-tr": {
+        "256": 12,
+        "384": 12,
+        "512": 12,
+        "768": 12
+      },
+      "shipping-and-delivery": {
+        "256": 2,
+        "384": 2,
+        "512": 2,
+        "768": 2
+      },
+      "standard-returns-2026": {
+        "256": 2,
+        "384": 2,
+        "512": 2,
+        "768": 2
+      },
+      "subscription-billing": {
+        "256": 2,
+        "384": 2,
+        "512": 2,
+        "768": 2
+      },
+      "support-escalation": {
+        "256": 1,
+        "384": 1,
+        "512": 1,
+        "768": 1
+      },
+      "support-playbook": {
+        "256": 34,
+        "384": 34,
+        "512": 34,
+        "768": 34
+      },
+      "tenant-b-api-limits": {
+        "256": 1,
+        "384": 1,
+        "512": 1,
+        "768": 1
+      }
+    }
+  }
+}

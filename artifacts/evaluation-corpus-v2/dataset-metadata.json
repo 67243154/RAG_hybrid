@@ -1,0 +1,14 @@
+{
+  "schema_version": "golden-dataset-v2",
+  "question_count": 445,
+  "corpus_fingerprint": "0175aa4a2f9beca7e1a996bcf976dc715c8e6d94a55b76f181500c8c5b8a57b7",
+  "dataset_fingerprint": "17474079f2abf80154b3ba1bf1afbc09c13fa16e2f75c26cb4a99bd44518868f",
+  "source_of_truth": "data/evaluation/evaluation-corpus-v2/golden-dataset-v2.json",
+  "split_policy": "Whole case families retain their committed development, calibration, or frozen_test assignment.",
+  "frozen_test_policy": "Frozen test records are edited only through an explicit benchmark dataset revision that produces a new dataset fingerprint.",
+  "case_family_policy": "All paraphrases and variants of one intent share one case_family and one split.",
+  "case_family_count": 112,
+  "frozen_test_id_sha256": "1d5609597bfd1aa5079be2345663e4f1af9422630651f7bff871e487a889beba",
+  "frozen_test_count": 133,
+  "inference_executed": false
+}

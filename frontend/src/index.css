@@ -1,0 +1,109 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Dark-first developer console palette — very dark graphite, not pure
+     black; surfaces step up in lightness by a small, consistent amount;
+     borders are thin and low-contrast; the accent is a restrained
+     blue-indigo used sparingly, never a glow/gradient. */
+  --color-background: oklch(0.16 0.004 260);
+  --color-surface: oklch(0.20 0.004 260);
+  --color-surface-hover: oklch(0.24 0.005 260);
+  --color-surface-raised: oklch(0.23 0.005 260);
+  --color-border: oklch(0.30 0.006 260);
+  --color-border-strong: oklch(0.38 0.008 260);
+  --color-foreground: oklch(0.92 0.003 260);
+  --color-muted-foreground: oklch(0.62 0.006 260);
+  --color-subtle-foreground: oklch(0.48 0.006 260);
+
+  --color-accent: oklch(0.62 0.14 264);
+  --color-accent-foreground: oklch(0.98 0.01 264);
+  --color-accent-muted: oklch(0.62 0.14 264 / 0.14);
+
+  --color-success: oklch(0.64 0.11 152);
+  --color-success-muted: oklch(0.64 0.11 152 / 0.14);
+  --color-warning: oklch(0.75 0.13 80);
+  --color-warning-muted: oklch(0.75 0.13 80 / 0.14);
+  --color-error: oklch(0.62 0.14 25);
+  --color-error-muted: oklch(0.62 0.14 25 / 0.14);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection {
+    background-color: var(--color-accent-muted);
+  }
+  /* Thin, low-contrast scrollbars — a console detail, not a feature. */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--color-border-strong);
+    border-radius: 999px;
+    border: 2px solid var(--color-background);
+  }
+}
+
+@layer utilities {
+  .font-technical {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.app-shell {
+  --color-surface: rgb(22 26 34 / 0.60);
+  --color-surface-raised: rgb(32 38 48 / 0.62);
+  --color-surface-hover: rgb(55 65 80 / 0.65);
+  --color-border: rgb(230 240 255 / 0.16);
+  --color-muted-foreground: oklch(0.77 0.006 260);
+  --color-subtle-foreground: oklch(0.68 0.006 260);
+}
+
+.app-wallpaper {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(ellipse at 10% 0%, #263b53, transparent 60%),
+    radial-gradient(ellipse at 95% 90%, #342b4e, transparent 65%), #10151e;
+  background-size: cover;
+  background-position: center;
+}
+
+.app-shell :is(.bg-\[var\(--color-surface\)\], .bg-\[var\(--color-surface-raised\)\]) {
+  -webkit-backdrop-filter: blur(18px) saturate(125%);
+  backdrop-filter: blur(18px) saturate(125%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.04), 0 4px 20px rgb(0 0 0 / 0.08);
+}
+
+.app-shell select option {
+  background: #202630;
+  color: #eef1f8;
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  .app-shell {
+    --color-surface: rgb(22 26 34 / 0.94);
+    --color-surface-raised: rgb(32 38 48 / 0.94);
+  }
+}

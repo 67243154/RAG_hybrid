@@ -1,0 +1,35 @@
+<component name="InspectionProjectProfileManager">
+  <profile version="1.0">
+    <option name="myName" value="Project Default" />
+    <inspection_tool class="Eslint" enabled="true" level="WARNING" enabled_by_default="true" />
+    <inspection_tool class="PyPackageRequirementsInspection" enabled="true" level="WARNING" enabled_by_default="true">
+      <option name="ignoredPackages">
+        <list>
+          <option value="fastapi" />
+          <option value="uvicorn" />
+          <option value="python-multipart" />
+          <option value="python-dotenv" />
+          <option value="langchain" />
+          <option value="langchain-community" />
+          <option value="langchain-openai" />
+          <option value="chromadb" />
+          <option value="sentence-transformers" />
+          <option value="rank_bm25" />
+          <option value="jieba" />
+          <option value="pypdf" />
+          <option value="openai" />
+          <option value="langchain-groq" />
+          <option value="langgraph" />
+          <option value="langsmith" />
+          <option value="pydantic" />
+          <option value="supabase" />
+          <option value="ddgs" />
+          <option value="duckduckgo-search" />
+          <option value="tiktoken" />
+          <option value="fastmcp" />
+        </list>
+      </option>
+    </inspection_tool>
+    <inspection_tool class="Stylelint" enabled="true" level="ERROR" enabled_by_default="true" />
+  </profile>
+</component>
