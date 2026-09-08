@@ -481,25 +481,38 @@ async def trace_detail(
     from app.ui.trace_client import fetch_trace_spans
 
     settings = _runtime_settings(request)
-    jaeger_url = settings.otel_exporter_otlp_endpoint.replace(":4317", ":16686")
-    if not jaeger_url.startswith("http"):
-        jaeger_url = "http://localhost:16686"
+    # The backend may need the in-network Docker service name to query
+    # Jaeger, while the browser needs a host-resolvable URL for the link.
+    jaeger_query_url = settings.otel_exporter_otlp_endpoint.replace(":4317", ":16686")
+    if not jaeger_query_url.startswith("http"):
+        jaeger_query_url = "http://localhost:16686"
+    jaeger_public_url = settings.jaeger_public_url.rstrip("/") or "http://localhost:16686"
 
     try:
         spans = await asyncio.to_thread(
-            fetch_trace_spans, trace_id, jaeger_url=jaeger_url, max_attempts=2
+            fetch_trace_spans, trace_id, jaeger_url=jaeger_query_url, max_attempts=2
         )
     except Exception:  # noqa: BLE001 - Jaeger down is a renderable state, not a 500
-        return {"trace_id": trace_id, "available": False, "spans": [], "jaeger_url": jaeger_url}
+        return {
+            "trace_id": trace_id,
+            "available": False,
+            "spans": [],
+            "jaeger_url": jaeger_public_url,
+        }
 
     if not spans:
-        return {"trace_id": trace_id, "available": False, "spans": [], "jaeger_url": jaeger_url}
+        return {
+            "trace_id": trace_id,
+            "available": False,
+            "spans": [],
+            "jaeger_url": jaeger_public_url,
+        }
 
     origin = min(s.start_time_us for s in spans)
     return {
         "trace_id": trace_id,
         "available": True,
-        "jaeger_url": jaeger_url,
+        "jaeger_url": jaeger_public_url,
         "spans": [
             {
                 "name": s.name,

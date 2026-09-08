@@ -286,17 +286,20 @@ async def _sse_event_stream(
         }
         yield f"event: security\ndata: {json.dumps(security_payload)}\n\n"
 
-        # stream_answer() (app/llm/generate.py) already yields its own
-        # "metadata" event carrying a trace_id extracted from its own
-        # "generate" span — since that span nests under this one (same
-        # trace, OTel context propagation), that trace_id already
-        # identifies this whole request; no need to re-extract or
-        # override it here.
+        # The generation implementations do not all emit a trace_id in
+        # their metadata (notably the support-ID pipeline).  Inject the
+        # request trace ID centrally while the chat_request root span is
+        # active.  setdefault preserves the ID emitted by older generation
+        # implementations while keeping the SSE metadata contract uniform.
+        span_context = span.get_span_context()
+        request_trace_id = format(span_context.trace_id, "032x") if span_context.is_valid else None
         async for event in deps.stream_fn(question, chunks):
             if event["type"] == "token":
                 yield f"data: {json.dumps({'token': event['content']})}\n\n"
             elif event["type"] == "metadata":
                 payload = {k: v for k, v in event.items() if k != "type"}
+                if request_trace_id is not None:
+                    payload.setdefault("trace_id", request_trace_id)
                 yield f"event: metadata\ndata: {json.dumps(payload)}\n\n"
             elif event["type"] == "security_validation":
                 payload = {k: v for k, v in event.items() if k != "type"}

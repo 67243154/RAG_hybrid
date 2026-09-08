@@ -294,6 +294,67 @@ def test_trace_detail_offloads_sync_client_to_a_worker_thread(tmp_path, monkeypa
     assert called is True
 
 
+def test_trace_detail_queries_internal_jaeger_but_returns_public_url(tmp_path, monkeypatch):
+    import app.ui.trace_client as trace_client_module
+
+    captured = {}
+
+    def fake_fetch(trace_id, **kwargs):
+        captured["trace_id"] = trace_id
+        captured["jaeger_url"] = kwargs["jaeger_url"]
+        return [
+            trace_client_module.SpanSummary(
+                name="chat_request", duration_ms=12.0, start_time_us=100
+            )
+        ]
+
+    monkeypatch.setattr(trace_client_module, "fetch_trace_spans", fake_fetch)
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    client = _client(
+        tmp_path,
+        docs_dir,
+        settings=Settings(
+            _env_file=None,
+            otel_exporter_otlp_endpoint="http://jaeger:4317",
+            jaeger_public_url="http://localhost:16686/",
+        ),
+    )
+
+    response = client.get("/ui/traces/abc123", headers=_auth("token-user-a"))
+
+    assert response.status_code == 200
+    assert response.json()["available"] is True
+    assert response.json()["jaeger_url"] == "http://localhost:16686"
+    assert captured == {"trace_id": "abc123", "jaeger_url": "http://jaeger:16686"}
+
+
+def test_trace_detail_error_still_returns_public_jaeger_url(tmp_path, monkeypatch):
+    import app.ui.trace_client as trace_client_module
+
+    def fake_fetch(*args, **kwargs):
+        raise ConnectionError("no jaeger here")
+
+    monkeypatch.setattr(trace_client_module, "fetch_trace_spans", fake_fetch)
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    client = _client(
+        tmp_path,
+        docs_dir,
+        settings=Settings(_env_file=None, jaeger_public_url="http://trace-host:16686/"),
+    )
+
+    response = client.get("/ui/traces/deadbeef", headers=_auth("token-user-a"))
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "trace_id": "deadbeef",
+        "available": False,
+        "spans": [],
+        "jaeger_url": "http://trace-host:16686",
+    }
+
+
 def test_evaluations_reports_unavailable_rather_than_fabricating(tmp_path, monkeypatch):
     import app.api.ui as ui_module
 

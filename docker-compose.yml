@@ -33,6 +33,7 @@ services:
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
       - QDRANT_URL=http://qdrant:6333
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - JAEGER_PUBLIC_URL=${JAEGER_PUBLIC_URL:-http://localhost:16686}
       - GENERATION_PROVIDER=${GENERATION_PROVIDER:-deepseek}
       - EMBEDDING_PROVIDER=ollama
       - CHUNKING_MODE=${CHUNKING_MODE:-token_aware}

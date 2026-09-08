@@ -249,6 +249,10 @@ class Settings(BaseSettings):
     notion_sync_interval_seconds: float = Field(default=1800.0, gt=0)
 
     otel_exporter_otlp_endpoint: str = "http://localhost:4317"
+    # Jaeger's address as seen by the user's browser.  This is intentionally
+    # separate from the OTLP/query endpoint used by the backend, because a
+    # Docker service name such as ``jaeger`` is not resolvable on the host.
+    jaeger_public_url: str = "http://localhost:16686"
 
     # v3 is the production trust-boundary prompt. v1/v2 remain
     # loadable for reproducible baseline comparisons.

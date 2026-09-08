@@ -1,5 +1,8 @@
+import json
 import pytest
+
 from fastapi.testclient import TestClient
+from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -251,3 +254,69 @@ async def test_sse_event_stream_opens_a_chat_request_root_span():
 
     span_names = {s.name for s in exporter.get_finished_spans()}
     assert "chat_request" in span_names
+
+
+async def test_sse_metadata_gets_request_trace_id_when_generator_omits_it():
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    tracer = provider.get_tracer("test")
+
+    async def stream_fn(question: str, chunks: list[SearchResult]):
+        yield {"type": "metadata", "pipeline_version": "support_ids"}
+
+    deps = ChatDependencies(search_fn=_fake_search, stream_fn=stream_fn)
+    events = [
+        event
+        async for event in _sse_event_stream(
+            "q", deps, RetrievalContext(tenant_id="default"), tracer=tracer
+        )
+    ]
+
+    metadata_event = next(event for event in events if event.startswith("event: metadata\n"))
+    payload = json.loads(metadata_event.split("data: ", 1)[1])
+    assert payload["trace_id"] == format(
+        next(span for span in exporter.get_finished_spans() if span.name == "chat_request")
+        .get_span_context()
+        .trace_id,
+        "032x",
+    )
+
+
+async def test_sse_metadata_preserves_generator_trace_id():
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    tracer = provider.get_tracer("test")
+
+    async def stream_fn(question: str, chunks: list[SearchResult]):
+        yield {"type": "metadata", "trace_id": "generator-trace-id"}
+
+    deps = ChatDependencies(search_fn=_fake_search, stream_fn=stream_fn)
+    events = [
+        event
+        async for event in _sse_event_stream(
+            "q", deps, RetrievalContext(tenant_id="default"), tracer=tracer
+        )
+    ]
+
+    metadata_event = next(event for event in events if event.startswith("event: metadata\n"))
+    payload = json.loads(metadata_event.split("data: ", 1)[1])
+    assert payload["trace_id"] == "generator-trace-id"
+
+
+async def test_sse_metadata_does_not_inject_an_invalid_noop_trace_id():
+    async def stream_fn(question: str, chunks: list[SearchResult]):
+        yield {"type": "metadata", "pipeline_version": "support_ids"}
+
+    deps = ChatDependencies(search_fn=_fake_search, stream_fn=stream_fn)
+    events = [
+        event
+        async for event in _sse_event_stream(
+            "q", deps, RetrievalContext(tenant_id="default"), tracer=trace.NoOpTracer()
+        )
+    ]
+
+    metadata_event = next(event for event in events if event.startswith("event: metadata\n"))
+    payload = json.loads(metadata_event.split("data: ", 1)[1])
+    assert "trace_id" not in payload
