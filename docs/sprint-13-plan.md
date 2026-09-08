@@ -1,134 +1,31 @@
-# Sprint 13 Plan — Safe Versioned Re-index
+# Sprint 13 计划 — 安全的版本化重索引
 
-## Goal
+## 目标
 
-Close the data-loss window in `ingest_connector`'s re-index path (Sprint
-4): a changed document currently gets its old chunks deleted *before* the
-new ones are parsed/embedded/upserted, so a failure mid-embed leaves it
-unsearchable — temporarily if the next sync retries successfully, or
-indefinitely if it doesn't.
+关闭 `ingest_connector` 重索引的数据丢失窗口。旧流程在新内容解析、嵌入和 upsert 前先删除旧块；中途失败会让文档不可搜索。
 
-## Current behavior, confirmed by reading the code (not the task description alone)
+## 修复：延迟清理，而非严格原子
 
-`app/ingestion/ingest.py::ingest_connector`, inside the per-document loop
-for changed/new documents:
+先完整写入新版本，再删除旧版本。这不是事务原子交换，而是“零停机版本化重索引 + 延迟清理”：新旧版本在短暂窗口内都可搜索，查询可能同时返回重复或旧内容；Qdrant 不提供本 sprint 所需的原子性，因此保留并测量该权衡。
 
-```python
-with tracer.start_as_current_span("delete_stale_chunks") as span:
-    store.delete_by_source(connector.source_type, document.source_id)
+新增 `document_version` payload 字段（值与 `doc_id` 相同），使清理意图明确。新增 `QdrantStore.delete_stale_versions(source_type, source_id, keep_version)`，删除匹配来源但版本不等于 `keep_version` 的点；无版本过滤的 `delete_by_source` 继续用于连接器中完全消失的文档。
 
-for batch_start in range(0, len(chunks), batch_size):
-    ...
-    dense_vectors = [await embed_fn(chunk.text) for chunk in batch]  # <-- can raise
-    ...
-    store.upsert_chunks(batch, dense_vectors, sparse_vectors)
-```
+## 新顺序
 
-`delete_by_source` runs unconditionally before a single embed call. If
-`embed_fn` raises on any batch (network error, Ollama timeout, OOM), the
-old chunks are already gone and the new ones are only partially written —
-the document is unsearchable until a later sync succeeds, and
-`registry.upsert_document()` (further down) never runs, so the registry
-correctly still thinks it's stale — but that doesn't put the deleted
-chunks back.
+1. 解析和分块，`Chunk` 携带 `document_version=content_hash`。
+2. 完成每一批嵌入和 upsert，期间不删除旧版本。
+3. 全部 upsert 成功后调用 `delete_stale_versions(..., keep_version=content_hash)`。
+4. 更新 registry。
 
-## Fix: deferred cleanup, not strict atomic
+若嵌入失败，旧块保持可搜索；若清理失败，新旧版本共存，并在下一次同步中重试。该过程不吞异常，重复执行相同 `content_hash` 是幂等的。
 
-Reorder to embed+upsert the new version completely first, then delete the
-old version — **only after** the new one is confirmed written. This is
-explicitly **not** presented as atomic (a true atomic swap would need a
-transactional store or a two-phase commit Qdrant doesn't offer) — it's a
-**zero-downtime versioned re-index with deferred cleanup**, and gets
-called that exact thing everywhere it's mentioned (code comments, tests,
-README, this doc). The real, disclosed tradeoff: during the gap between
-"new version's chunks are upserted" and "old version's chunks are
-deleted," both versions are simultaneously present and searchable — a
-query can return duplicate/stale-alongside-fresh results for that
-document. This sprint doesn't eliminate that window; it measures it and
-documents it, because eliminating it would require the atomicity Qdrant
-doesn't provide.
+## 验证计划
 
-### Mechanism: a `document_version` payload field
+- 使用真实多批次文档，在嵌入中途抛错，确认旧版本文本仍在 store 中。
+- 在最后一次 upsert 与清理之间用真实内存 Qdrant 捕获两个 `document_version` 同时存在的窗口。
+- 通过 `InMemorySpanExporter` 比较最后一个 `upsert_batch` 与 `delete_stale_chunks` 的 OTel 时间戳，报告实际窗口时长。
+- 重新运行 Sprint 4/5 的同步和引用隔离测试，确认它们依赖最终状态而非旧的删除顺序。
 
-Every chunk already carries `doc_id` (the content hash — Sprint 0/3), and
-the point ID itself is derived partly from `doc_id`, so old- and
-new-version chunks already get distinct point IDs today (no accidental
-overwrite risk). A **new**, dedicated `document_version` payload field is
-added anyway (same value as `doc_id`, set alongside it in
-`chunk_document`/`chunk_markdown_text`) rather than overloading `doc_id`
-for this — `doc_id`'s job is "one ingredient of a unique point ID,"
-`document_version`'s job is "the filter key deferred cleanup deletes by."
-Giving the deferred-cleanup mechanism its own explicitly-named field
-keeps that intent legible in the Qdrant payload itself, and decouples it
-from whatever `doc_id`'s hashing scheme does in the future.
+## 范围边界
 
-New `QdrantStore.delete_stale_versions(source_type, source_id, keep_version)`:
-deletes every point matching `(source_type, source_id)` whose
-`document_version` is **not** `keep_version`. Called only after the new
-version's chunks are fully upserted. `QdrantStore.delete_by_source`
-(deletes *everything* for a source, no version filter) is unchanged and
-stays the right tool for the "document vanished from its connector
-entirely" case (`ingest_connector`'s phase 1) — that's a real full
-deletion, not a version transition.
-
-### New `ingest_connector` order for a changed/new document
-
-1. Parse + chunk (unchanged) — each `Chunk` now carries
-   `document_version=content_hash`.
-2. Embed + upsert every batch (unchanged logic, just no longer preceded
-   by a delete) — chunks for the OLD version are untouched throughout.
-3. Only once every batch upserts successfully:
-   `store.delete_stale_versions(source_type, source_id, keep_version=content_hash)`.
-4. `registry.upsert_document(...)` (unchanged position — after the whole
-   document's Qdrant work, so a failure anywhere above still leaves the
-   registry correctly claiming "still stale," and a retry is safe: the
-   same `content_hash` becomes `keep_version` again, so re-running step
-   2 with identical vectors is idempotent, not a leak).
-
-If step 2 raises, steps 3–4 never run — the OLD version's chunks are
-still there (never deleted) and still searchable. This is the concrete
-fix the DoD asks to prove.
-
-If step 3 itself fails (e.g. a network blip on the delete call), the
-document is left with **both** versions searchable rather than the old
-one lost — strictly better than today, and self-heals on the next sync
-(registry wasn't updated, so it's still "changed," and step 3 is
-re-attempted with the same `keep_version`, safe to repeat).
-
-## Real verification plan (not just structural)
-
-- **Data-loss window closed**: a real scenario test that changes a
-  document, then re-runs `ingest_connector` with `embed_fn` raising
-  partway through a real multi-batch document. Confirms the exception
-  propagates (as it does today — no new swallowing) *and* that the OLD
-  version's chunks are still in the store, `text` intact, unaffected by
-  the aborted re-index. This is the direct contrast with Sprint 4's
-  "delete first" behavior, which this same test would fail against the
-  old code.
-- **Duplicate-visibility window is real, not just claimed**: a store
-  subclass hook captures Qdrant's actual state (both `document_version`s
-  present, via a raw scroll) at the exact moment *between* the last
-  successful upsert and the `delete_stale_versions` call, in a real
-  (`:memory:`) Qdrant — proving the window isn't just a comment, it's an
-  observable intermediate state.
-- **Window duration, measured, not estimated**: `delete_stale_chunks` is
-  already its own span (Sprint 8) immediately following the last
-  `upsert_batch` span for that document — the real gap between the last
-  `upsert_batch` span's end time and `delete_stale_chunks`'s start time
-  (both real OTel timestamps, nanosecond precision, captured via
-  `InMemorySpanExporter`) is the actual measured window for a real run,
-  reported in the closing note rather than guessed.
-- **Existing Sprint 4/5 assumptions re-verified, not just re-run**: read
-  `tests/test_sync_scenarios.py` and
-  `tests/test_citation_cross_source_leak_e2e.py` against the new flow
-  before touching anything — neither depends on the OLD delete-first
-  ordering specifically (they assert end states: no orphans, correct
-  final content, no cross-source leakage), so they're expected to keep
-  passing unchanged; run them to confirm rather than assume.
-
-## Scope boundary
-
-No attempt to deduplicate search results during the visibility window
-(e.g. preferring the newest `document_version` at query time) — that
-would paper over the very tradeoff this sprint is supposed to surface
-honestly. `app/retrieval/search.py`/`hybrid_search.py` are untouched.
+不在查询时去重或优先最新 `document_version`；`app/retrieval/search.py` 和 `hybrid_search.py` 不改动。

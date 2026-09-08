@@ -1,174 +1,47 @@
-# Sprint 9 Plan — Evaluation
+# Sprint 9 计划 — 评估
 
-## Goal
+## 目标
 
-A golden-set-based quality harness, runnable by command, that reports
-retrieval + generation metrics broken down by content format (PDF vs.
-Markdown — see "content_type vs source_type" below), reusing
-`production-rag-platform`'s proven DeepEval + local-judge approach rather
-than re-litigating the RAGAS-vs-DeepEval decision.
+建立可通过命令运行的 golden set 质量评估框架，按内容格式（PDF 与 Markdown）报告检索和生成指标。复用 `production-rag-platform` 已验证的 DeepEval + 本地评估模型方案，不再重复讨论 RAGAS 与 DeepEval 的选择。
 
-## RAGAS: not re-attempted
+## 不再尝试 RAGAS
 
-`production-rag-platform` tried RAGAS first and dropped it for a real,
-already-documented dependency conflict (not a taste choice) — that
-elimination is treated as settled fact here. This sprint starts directly
-from DeepEval + a local Ollama judge model, matching
-`app/evaluation/generation_metrics.py`'s reference design in that repo.
+`production-rag-platform` 曾实际尝试 RAGAS，因已记录的依赖冲突而放弃，并非偏好选择。本 sprint 直接采用 DeepEval 和本地 Ollama 评估模型，对齐该项目 `app/evaluation/generation_metrics.py` 的参考设计。
 
-## Judge model: qwen2.5:7b-instruct
+## 评估模型：qwen2.5:7b-instruct
 
-Ported unchanged from production-rag-platform, which found — in real
-testing — that `qwen2.5:3b-instruct` produced an internally inconsistent
-verdict/reason pair as a judge (the reasoning text disagreed with the
-numeric verdict); 7B fixed it on the same test. This project already has
-`qwen2.5:7b-instruct` pulled (it's also the default `ollama_model` for
-generation — see below for why generation uses a *different*, smaller
-model for the golden-set run despite that).
+生产项目的真实测试发现 `qwen2.5:3b-instruct` 作为评估模型时，文字理由与数值判定不一致；同一测试中 7B 模型修复了该问题。本项目已经拉取 `qwen2.5:7b-instruct`，它也是默认 `ollama_model`，但 golden set 运行会使用更小的生成模型，以验证模型切换场景。
 
-## Two real bugs from production-rag-platform's Sprint 9, and how this
-## harness avoids repeating them
+## 两个已避免的真实问题
 
-**1. Harness model-switching thrashing (interleaved judge/generation
-calls forced Ollama to reload the model almost every call, turning an
-~11-minute expected run into 40+ minutes).** Avoided structurally, not
-situationally: `run_evaluation()` is two-phase — phase 1 runs
-retrieval+generation for *every* question first (one model loaded the
-whole time), phase 2 runs *all* judge scoring second (the judge model
-loaded once, for the whole phase). This is ported directly from
-`production-rag-platform/app/evaluation/harness.py`'s `run_evaluation()`.
-It costs nothing when generation and judge happen to be the same model,
-and is load-bearing the moment they differ — which is a real, supported
-configuration here (`Settings.generation_provider`/`ollama_model` are
-user-configurable), so the phase separation is kept unconditionally
-rather than only added if today's default config would trigger the bug.
-To actually exercise the thrash-prone scenario (not just carry the
-structure untested), the golden-set run in this sprint deliberately uses
-`qwen2.5:3b-instruct` for generation and `qwen2.5:7b-instruct` for
-judging — two distinct models, like production-rag-platform's own setup.
+1. **模型切换抖动**：交错调用评估模型和生成模型会使 Ollama 频繁重载，约 11 分钟的任务可能超过 40 分钟。`run_evaluation()` 固定为两阶段：阶段 1 先完成所有问题的检索+生成，阶段 2 再完成所有评估；每个阶段只加载一个模型。golden set 明确使用 `qwen2.5:3b-instruct` 生成、`qwen2.5:7b-instruct` 评估，以实际覆盖该场景。
+2. **OllamaClient 超短超时**：本项目的 `app/llm/ollama_client.py::OllamaClient` 已在 Sprint 0 将默认超时设为 `DEFAULT_TIMEOUT_SECONDS = 120.0`。DeepEval 的 `OllamaModel` 使用官方 `ollama` 包的独立 HTTP 客户端，默认 `timeout=None` 表示不限制超时，并不复现旧问题，因此不额外添加超时覆盖。
 
-**2. `OllamaClient`'s too-short timeout (`httpx.ReadTimeout` mid-call
-under a 7B judge's sustained load).** Investigated fresh rather than
-assumed fixed, because there are actually *two* separate HTTP paths in
-play here, and only one of them was previously touched:
+## 检索指标与位置身份
 
-- This project's own `app/llm/ollama_client.py::OllamaClient` (used for
-  RAG generation) already carries a `DEFAULT_TIMEOUT_SECONDS = 120.0`
-  fix from Sprint 0, with a comment citing this exact
-  production-rag-platform bug. No new work needed there.
-- DeepEval's judge wrapper (`deepeval.models.OllamaModel`, used by
-  `FaithfulnessMetric`/`AnswerRelevancyMetric`) does **not** go through
-  `OllamaClient` at all — it uses the official `ollama` PyPI package's
-  own `Client`/`AsyncClient` internally. This is a code path this
-  project had never inspected before. Traced its source (`ollama`
-  v0.6.2): `BaseClient.__init__(..., timeout: Any = None, ...)` passes
-  `timeout` straight through to the underlying `httpx.Client`. Verified
-  directly (not assumed) what `httpx.Client(timeout=None)` actually does:
+PDF 专用的 `Location = tuple[int, int]` 不适合多来源架构。本项目使用 `app/llm/grounding.py` 已采用的 `(source_type, source_id, location)` 三元组；`location` 由 `app/llm/citation_location.py::location_for()` 生成（Markdown 为标题路径，PDF 为 `page/paragraph`）。`app/evaluation/retrieval_metrics.py` 使用相同身份，因此精确率/召回率是确定性的集合交集计算，无需评估模型。
 
-  ```python
-  >>> httpx.Client(timeout=None).timeout
-  Timeout(timeout=None)
-  ```
+## content_type 与 source_type
 
-  Per httpx's own semantics, `Timeout(None)` disables the timeout
-  entirely (no time limit, not "fall back to httpx's 5s default"). So
-  DeepEval's judge HTTP path cannot reproduce a "timeout too short" read
-  error — its default is the opposite failure mode (unbounded wait), and
-  a 7B judge call finishing in the tens-of-seconds range on this machine
-  is nowhere near a real problem worth guarding against speculatively. No
-  explicit timeout override is added to `build_default_metrics()`'s
-  `OllamaModel(...)` construction — there is nothing to fix here, and the
-  original comment risk ("OllamaClient's short timeout") turns out to
-  only ever have applied to this project's *own* client, which was
-  already fixed in Sprint 0.
+本 sprint 的问题是“PDF 还是 Markdown 更弱”，属于格式而非连接器问题。`source_type` 标识连接器，`content_type` 标识格式；本项目两种格式都来自 `LocalFilesystemConnector`（`source_type="filesystem"`）。每个 `GoldenQuestion` 带有 `content_type`（`"pdf"` / `"markdown"`），`build_report()` 同时计算全局指标和各格式均值。
 
-## Retrieval metrics: generalized location scheme
+## Golden set：只使用真实内容
 
-production-rag-platform's `Location = tuple[int, int]` (page, paragraph)
-is PDF-only and doesn't fit this project's multi-source grounding model.
-This project's true chunk identity is the `(source_type, source_id,
-location)` triple already used by `app/llm/grounding.py` for citation
-checking (`location` itself computed by
-`app/llm/citation_location.py::location_for()` — a heading path string
-for Markdown, `"page/paragraph"` for PDF). `app/evaluation/retrieval_metrics.py`
-uses that same triple and the same `location_for()` function, so a golden
-question's `expected_locations` and a retrieved chunk's derived location
-are checked against *exactly* the same identity `grounding.py` already
-uses to validate real citations — no separate, drifting definition of
-"which chunk is this." Precision/recall stay classic set-overlap
-(deterministic, no judge needed — ground truth locations make this exact,
-unlike faithfulness/relevancy which need a judge because there's no
-ground-truth *text* to diff against).
+- **PDF**：复用 `tests/fixtures/golden_source.py` 的 Nimbus Cloud Storage 手册构建器（6 页）。
+- **Markdown**：新增 `tests/fixtures/golden_markdown_source.py`，构造包含安装、认证、同步参数和故障排查的 Nimbus CLI 多标题参考文档。
+- **Notion**：因本机未设置 `NOTION_API_KEY` 而排除，不用 mock 替代，并在结果中明确说明。
 
-## content_type vs source_type — which one the breakdown is keyed on
+两个 fixture 都通过真实 `ingest_connector()`、真实本地 Qdrant 和 Ollama 嵌入导入；`expected_locations` 从实际分块后的 payload 通过 `location_for()` 读取，而不是预先猜测。
 
-The DoD/PLANNING.md wording ("kaynak tipi bazında kırılım") could be
-read as `source_type` (the connector — `filesystem`, `notion`), but the
-concrete ask in this sprint's instructions is explicit: *"PDF sorularında
-mı, Markdown sorularında mı sistem daha zayıf"* — that's a **format**
-question, not a **connector** question. In this project's architecture
-(Sprint 3), `source_type` identifies the connector and `content_type`
-identifies the format — both PDF and Markdown questions here come from
-the *same* connector (`LocalFilesystemConnector`, `source_type="filesystem"`),
-so breaking down by `source_type` would put them in one indistinguishable
-bucket and silently fail to answer the actual question asked. Each
-`GoldenQuestion` therefore carries a `content_type: str` field
-(`"pdf"` / `"markdown"`), and `build_report()` computes the same mean
-metrics once globally and once more per distinct `content_type` value
-present in the results.
+## 框架设计
 
-## Golden set: real content only
+`app/evaluation/` 包含：
 
-- **PDF**: reuses `tests/fixtures/golden_source.py`'s existing "Nimbus
-  Cloud Storage" handbook builder (6 pages, already used elsewhere in
-  this project's tests) — real, deterministic, already-verified content.
-- **Markdown**: a new fixture, `tests/fixtures/golden_markdown_source.py`,
-  building a small but real multi-heading "Nimbus CLI" reference doc
-  (install steps, auth, sync command flags, troubleshooting) with the
-  same "every fact traceable to one exact heading path" discipline as the
-  PDF fixture.
-- **Notion**: excluded. `NOTION_API_KEY` is unset on this machine (same,
-  already-documented gap as Sprints 1 and 6) — no Notion questions are
-  added to the golden set, and this is stated plainly rather than
-  papered over with a mocked substitute.
+- `retrieval_metrics.py`：`RetrievalMetrics` 与三元组检索指标计算。
+- `generation_metrics.py`：构建 `LLMTestCase`，运行 `FaithfulnessMetric`/`AnswerRelevancyMetric`，并通过 `deepeval.models.OllamaModel` 配置默认评估器。
+- `harness.py`：`GoldenQuestion`、`QuestionResult`、`load_golden_set()`、两阶段 `run_evaluation()`、按全局及 `content_type` 汇总的 `build_report()`。
+- `cli.py`：`python -m app.evaluation.cli --golden-set <path>`，连接真实 Ollama、Qdrant、稀疏编码器和可选重排序器，输出 JSON 报告。
 
-Both fixtures are ingested into a real (non-`:memory:`) local Qdrant
-collection via the real `ingest_connector()` pipeline and a real Ollama
-embedding call — the golden set's `expected_locations` are read back from
-what actually got chunked/embedded (via `location_for()` on the real
-chunk payloads), not guessed ahead of ingestion.
+## 测试范围
 
-## Harness design
-
-`app/evaluation/`:
-
-- `retrieval_metrics.py` — `RetrievalMetrics` dataclass,
-  `compute_retrieval_metrics(retrieved, expected_locations)`, using the
-  `(source_type, source_id, location)` triple.
-- `generation_metrics.py` — `compute_generation_metrics(...)` (builds one
-  `LLMTestCase` per question, runs each configured metric), and
-  `build_default_metrics(judge_model_name, base_url)` wiring
-  `FaithfulnessMetric`/`AnswerRelevancyMetric` against
-  `deepeval.models.OllamaModel`.
-- `harness.py` — `GoldenQuestion` (adds `content_type` vs.
-  production-rag-platform's version), `QuestionResult`,
-  `load_golden_set(path)`, `run_evaluation(...)` (two-phase, with a
-  `progress_callback` for both phases — ported pattern), `build_report(results)`
-  (global means + per-`content_type` means + not-found accuracy).
-- `cli.py` — `python -m app.evaluation.cli --golden-set <path>` wires real
-  `OllamaProvider`/`EmbeddingProvider`, real `QdrantStore` +
-  `SparseEncoder` (+ optional `CrossEncoderReranker`), builds
-  `search_fn`/`generate_fn` closures around `app.retrieval.search.search`
-  / `app.llm.generate.stream_answer`, and prints the JSON report —
-  satisfies "golden set komutla çalıştırılabiliyor."
-
-## Test-first scope
-
-Per the instructions, metric *computation* logic is unit-tested
-(retrieval precision/recall math, generation metric aggregation, two-phase
-ordering via fakes, report breakdown math including the `content_type`
-split) — the real, live golden-set run itself (real Ollama, real Qdrant,
-real 7B judge) is verified as a manual e2e run with captured, honest
-output in the Sprint 9 closing note, not asserted in CI (too slow/
-environment-dependent, consistent with how Sprint 8's real-Jaeger check
-was handled).
+单元测试覆盖检索精确率/召回率、生成指标聚合、两阶段顺序和格式拆分。真实 Ollama、Qdrant、7B 评估模型的 golden set 运行作为手工端到端验证并在 Sprint 9 收尾记录中保存真实输出，不放入 CI，以避免耗时和环境依赖。

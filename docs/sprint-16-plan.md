@@ -1,259 +1,68 @@
-# Sprint 16 — Re-index Failure Semantics & Hardening
+# Sprint 16 — 重索引失败语义与加固
 
-## Context (read before planning, not assumed)
+## 背景（规划前请阅读，不要想当然）
 
-Sprint 15's closing note reported 365 tests green, `ruff` clean, and a
-shutdown-handling gap found and fixed. It did not touch `ingest_connector`'s
-actual re-index loop. [ADR 0003](adr/0003-deferred-cleanup-versioned-reindex.md)
-documents Sprint 13's deferred-cleanup ordering and its measured ~12µs
-duplicate-visibility window — but re-reading `app/ingestion/ingest.py`
-(lines 268–294) alongside that ADR exposes a real gap the ADR doesn't
-mention: the "new version fully embedded and upserted before cleanup"
-guarantee is only true **within a single batch**. The embed/upsert loop
-runs batch-by-batch (`for batch_start in range(0, len(chunks),
-upsert_batch_size)`), with no try/except around it. If batch 1's embed
-and upsert succeed but batch 2's embed raises, batch 1's chunks are
-already committed to Qdrant under the new `document_version`, the
-exception propagates out of `ingest_connector` unhandled, and
-`delete_stale_chunks` never runs. Contents left behind: the OLD
-version's points (untouched, so far so good) **plus a partial NEW
-version** — some but not all of the new document's chunks. The
-Sprint 13 ADR's core claim ("a failure mid-embed... leaves the OLD
-version fully intact") is still true, but it's incomplete: it doesn't
-disclose that a *partial* NEW version can now also be sitting there,
-polluting search results with truncated/inconsistent new content
-alongside the still-complete old content. This is the bug an external
-review flagged and item 1 below fixes.
+Sprint 15 的收尾记录报告了 365 个测试通过、`ruff` 检查干净，并发现且修复了一个关停处理缺口。但它没有触及 `ingest_connector` 的实际重索引循环。[ADR 0003](adr/0003-deferred-cleanup-versioned-reindex.md) 记录了 Sprint 13 的延迟清理顺序，以及实测约 12µs 的重复可见窗口——但将该 ADR 与 `app/ingestion/ingest.py`（第 268–294 行）重新对照后，会暴露出 ADR 未提及的真实缺口：“新版本全部完成嵌入并写入后再清理”的保证只在**单个批次内**成立。嵌入/写入循环按批次执行（`for batch_start in range(0, len(chunks), upsert_batch_size)`），但循环外没有 try/except。如果第 1 批嵌入和写入成功，而第 2 批嵌入抛出异常，那么第 1 批的分块已经以新的 `document_version` 提交到 Qdrant，异常从 `ingest_connector` 未处理地向外传播，`delete_stale_chunks` 永远不会运行。留下的内容是：旧版本的点（未被触碰，到目前为止没问题）**加上部分新版本**——新文档的分块只有一部分。Sprint 13 ADR 的核心声明（“嵌入中途失败……会使旧版本保持完整”）仍然成立，但并不完整：它没有披露此时还可能存在一个*部分的新版本*，使搜索结果中同时出现截断且不一致的新内容和仍然完整的旧内容。这正是外部评审指出的 bug，也是下面第 1 项要修复的问题。
 
-Confirmed directly against code (not assumed) for the other items:
-- `Settings` (`app/shared/config.py`) has zero Pydantic `Field`
-  constraints anywhere — `embedding_concurrency: int = 4` is a bare
-  annotation. `EMBEDDING_CONCURRENCY=0` passes construction silently and
-  would deadlock `asyncio.Semaphore(0)` the first time
-  `embed_texts_concurrently` is called (confirmed by reading
-  `app/ingestion/ingest.py::embed_texts_concurrently` — `Semaphore(0)`
-  never allows any `_bounded` coroutine past `async with`, so
-  `asyncio.gather` never completes for a non-empty batch).
-- `app/ui/pages/chat.py` (lines 61–66) already branches on
-  `has_citations` but treats every citation-free answer as the neutral
-  "ℹ️ No citations" case — including a citation-free answer that ISN'T
-  the model's honest `NOT_FOUND_PHRASE` ("I could not find this in the
-  document.", `app/llm/prompt.py`), which is actually a silent
-  hallucination (the model claimed something with no citation to back
-  it at all, worse than a wrong citation).
-- `QdrantStore.ensure_collection()` (`app/ingestion/qdrant_store.py`)
-  only checks `SPARSE_VECTOR_NAME in (info.config.params.sparse_vectors
-  or {})` on an existing collection — it never inspects
-  `info.config.params.vectors[VECTOR_NAME].size` or `.distance`. A
-  collection created with the right sparse config but a stale/wrong
-  dense dimension (e.g. an old `768`-dim collection reused after
-  switching to a different embedding model) would pass `ensure_collection`
-  silently and then fail loudly and confusingly at the first `upsert`
-  instead.
-- `app/main.py`'s `lifespan` already runs `for hook in on_shutdown or
-  []: await hook()` with no try/except — one hook raising (e.g. Notion's
-  `aclose()` erroring on a half-open connection) would abort the loop
-  and skip closing the Ollama/chat-provider clients that come after it
-  in the list. `app/wiring.py::build_app()`'s `on_shutdown` list also
-  never includes `qdrant_client` itself — only `ollama.aclose`,
-  `chat_provider.aclose`, and connector `aclose`s. `QdrantClient.close()`
-  is sync, not async (confirmed via `qdrant_client`'s installed
-  signature), so it needs a small async wrapper to fit the hook shape.
-- README's opening paragraph says "ingesting multiple document types
-  (PDF, Markdown, web pages, Notion, Confluence) through a shared
-  `Connector` interface" — false as written for two of five: `web_parser.py`
-  exists and is tested (Sprint 6) but there is no `WebConnector` (already
-  correctly disclosed in Known Limitations, just not in the intro), and
-  Confluence has never been started (Sprint 16 stretch, not this sprint).
-  Separately, `## Status` still says "Sprints 0–11 complete" even though
-  Sprints 12–15 are done and this plan is Sprint 16.
-- `scripts/benchmarks/benchmark_embedding_concurrency.py`'s current methodology: one
-  run per (chunk_count, concurrency) pair, no warmup, concurrency levels
-  always tested in the same fixed order `[1, 2, 4, 8]` (so any
-  monotonic warm-up/cache effect across the whole run gets misread as a
-  concurrency effect), and no variance reported at all — the README's
-  "plateau within measurement noise" framing (Sprint 14 closing note)
-  is asserted, not backed by a stddev number.
-- `.github/workflows/ci.yml`'s lint job runs `ruff check app tests` —
-  `scripts/` is never linted, confirmed by grepping the workflow file.
+以下其他事项均已直接对照代码确认（不是想当然）：
+- `Settings`（`app/shared/config.py`）中任何地方都没有 Pydantic `Field` 约束——`embedding_concurrency: int = 4` 只是一个普通注解。`EMBEDDING_CONCURRENCY=0` 会静默通过构造，并且第一次调用 `embed_texts_concurrently` 时会让 `asyncio.Semaphore(0)` 死锁（通过阅读 `app/ingestion/ingest.py::embed_texts_concurrently` 已确认——对于非空批次，`Semaphore(0)` 永远不允许任何 `_bounded` 协程通过 `async with`，因此 `asyncio.gather` 永远不会完成）。
+- `app/ui/pages/chat.py`（第 61–66 行）已经根据 `has_citations` 分支，但把所有无引用答案都当作中性的“ℹ️ No citations”情况——包括没有引用、却又**不是**模型诚实的 `NOT_FOUND_PHRASE`（“I could not find this in the document.”，`app/llm/prompt.py`）的答案；这实际上是一次静默幻觉（模型声称了某件事，却完全没有引用支持，比引用错误更糟）。
+- `QdrantStore.ensure_collection()`（`app/ingestion/qdrant_store.py`）对于已存在的集合，只检查 `SPARSE_VECTOR_NAME in (info.config.params.sparse_vectors or {})`——从不检查 `info.config.params.vectors[VECTOR_NAME].size` 或 `.distance`。如果集合具有正确的稀疏配置，却有过时/错误的稠密维度（例如更换嵌入模型后仍复用旧的 `768` 维集合），`ensure_collection` 会静默通过，然后在第一次 `upsert` 时才失败。
+- `app/main.py` 的 `lifespan` 已经执行 `for hook in on_shutdown or []: await hook()`，但没有 try/except——一个 hook 抛异常（例如 Notion 的 `aclose()` 在半开放连接上出错）就会中止循环，跳过之后才关闭的 Ollama/chat-provider 客户端。`app/wiring.py::build_app()` 的 `on_shutdown` 列表也从未包含 `qdrant_client` 本身——只有 `ollama.aclose`、`chat_provider.aclose` 和连接器的 `aclose`。`QdrantClient.close()` 是同步的，不是异步的（已通过已安装的 `qdrant_client` 签名确认），因此需要异步包装器以适配 hook 形状。
+- README 的开头段落称通过共享的 `Connector` 接口“摄取多种文档类型（PDF、Markdown、网页、Notion、Confluence）”——对于五类中的两类，这种说法是错误的：`web_parser.py` 存在且已有测试（Sprint 6），但没有 `WebConnector`（README 的 Known Limitations 已正确披露），而 Confluence 从未开始实现（是 Sprint 16 的 stretch 项，不属于本 sprint）。另外，`## Status` 仍写着“Sprints 0–11 complete”，尽管 Sprints 12–15 已完成。
+- `scripts/benchmarks/benchmark_embedding_concurrency.py` 当前的方法是：每个（chunk_count, concurrency）组合只运行一次、没有预热、并且始终以固定顺序 `[1, 2, 4, 8]` 测试并发级别（因此整个运行过程中的预热/缓存效应可能被误判为并发效应），完全不报告方差——README 的“在测量噪声范围内达到平台期”（Sprint 14 收尾记录）没有标准差数字支撑。
+- `.github/workflows/ci.yml` 的 lint job 运行 `ruff check app tests`——从未对 `scripts/` 做 lint，这一点已通过检查 workflow 文件确认。
 
-## Scope, in priority order
+## 范围（按优先级排序）
 
-### 1. Multi-batch partial-new re-index bug (critical)
+### 1. 多批次部分新版本重索引 bug（关键）
 
-**Fix**: add `QdrantStore.delete_version(source_type, source_id,
-document_version)` — deletes points matching a specific version (the
-mirror image of `delete_stale_versions`, which deletes everything
-*except* one version; this deletes everything *matching* one version).
-Wrap `ingest_connector`'s per-document embed/upsert loop in
-try/except: on any exception, call
-`store.delete_version(connector.source_type, document.source_id,
-content_hash)` to remove whatever partial NEW-version points made it in
-across however many batches succeeded before the failure, then
-re-raise the original exception unchanged (propagation behavior is
-otherwise untouched — Sprint 13 already relies on "the error escapes
-`ingest_connector`", and this sprint doesn't change that contract).
-After rollback, the collection is back to exactly what it was before
-this document's re-index attempt: only the OLD version's points,
-nothing from the NEW one — restoring the ADR 0003 guarantee for the
-*whole* document, not just its first batch.
+**修复**：新增 `QdrantStore.delete_version(source_type, source_id, document_version)`——删除匹配指定版本的点（与删除除某一版本之外所有内容的 `delete_stale_versions` 互为镜像；此方法删除所有*匹配*某一版本的内容）。将 `ingest_connector` 的单文档嵌入/写入循环包裹在 try/except 中：一旦出现任何异常，调用 `store.delete_version(connector.source_type, document.source_id, content_hash)`，删除此前成功的任意批次中已经写入的部分新版本点，然后原样重新抛出原始异常（其他传播行为保持不变——Sprint 13 已经依赖“错误从 `ingest_connector` 逃逸”，本 sprint 不改变这一契约）。
 
-**Test-first** (`tests/test_versioned_reindex.py`, new test): a document
-that chunks into at least 6 pieces, `upsert_batch_size=2` (3 batches),
-an `embed_fn` that succeeds for batch 1 then raises on batch 2. Assert:
-(a) every one of the OLD version's points is still present with its
-original text, (b) **zero** points anywhere carry the NEW
-`document_version` (proving the partial batch-1 write was rolled back,
-not just left alone), (c) the registry's `content_hash` is still the
-OLD hash (so a retry sees this document as still "changed").
+回滚后，集合应精确恢复到该文档重索引尝试之前的状态：只有旧版本的点，新版本一个也没有——将 ADR 0003 对**整个文档**的保证恢复完整，而不再只对第一批有效。
 
-### 2. Re-measure the duplicate-visibility window honestly
+**测试先行**（`tests/test_versioned_reindex.py`，新增测试）：一个文档被切成至少 6 个分块，`upsert_batch_size=2`（3 个批次），`embed_fn` 在第 1 批成功、在第 2 批抛异常。断言：(a) 旧版本的每个点仍然存在且文本保持原样；(b) 任何地方都没有携带新 `document_version` 的点（证明第 1 批的部分写入被回滚，而不是被留下）；(c) 注册表的 `content_hash` 仍是旧 hash（因此重试时仍会将该文档视为已变更）。
 
-The existing `test_duplicate_visibility_window_duration_is_measured_via_real_spans`
-test measures from the LAST `upsert_batch` span's end to
-`delete_stale_chunks`'s start — using a document that fits in a single
-batch, so "last upsert_batch" and "first upsert_batch" are the same
-span. That's the wrong number for the real multi-batch case: once
-batch 1 of a multi-batch re-index is upserted, its NEW-version chunks
-are searchable immediately, side by side with the (still fully intact)
-OLD version — and stay that way until `delete_stale_chunks` finally
-runs after the LAST batch. The true window is measured from the
-**first** `upsert_batch` span's end to `delete_stale_chunks`'s start,
-and only equals the old number when there's exactly one batch.
+### 2. 诚实地重新测量重复可见窗口
 
-**Fix**: new test using a real multi-batch document (`upsert_batch_size`
-small enough to force 3+ batches) measuring `first upsert_batch end` →
-`delete_stale_chunks start`, printed and asserted `>= 0` the same way
-the existing test does (not tightly bounded — it's an observed real
-number). Keep the original single-batch test as-is (it's still a valid,
-correct measurement of the single-batch case) and add the new
-multi-batch one alongside it, not replacing it — both are real, they
-just measure different scenarios. README's "~12 microseconds" claim
-gets updated with whichever real number the new multi-batch measurement
-produces, and the prose is adjusted to state plainly that the window
-scales with re-index duration for multi-batch documents (more batches =
-more time between the first partial-new-version write and final
-cleanup), not a fixed ~12µs regardless of document size.
+现有测试 `test_duplicate_visibility_window_duration_is_measured_via_real_spans` 测量的是最后一个 `upsert_batch` span 结束到 `delete_stale_chunks` 开始之间的时间——它使用了适合单批次的文档，因此“最后一个 upsert_batch”和“第一个 upsert_batch”是同一个 span。对于真实的多批次情况，这是错误的数字：多批次重索引一旦第 1 批被写入，其新版本分块就会立即可搜索，与仍然完整的旧版本并存——并持续到最后一批完成后 `delete_stale_chunks` 才运行。真实窗口应从**第一个** `upsert_batch` span 结束测量到 `delete_stale_chunks` 开始，并且只有恰好一个批次时才等于旧数字。
 
-### 3. Config validation
+**修复**：新增一个真实多批次文档测试（`upsert_batch_size` 足够小以强制产生至少 3 个批次），测量“第一个 upsert_batch 结束”→“`delete_stale_chunks` 开始”，像现有测试一样打印并断言 `>= 0`（不做严格上限约束——这是一个观测到的真实数字）。保留原来的单批次测试不变，并在旁边新增多批次测试，不要替换——两者都是真实场景，只是测量不同情况。README 的“约 12 微秒”声明要更新为新多批次测量得到的真实数字，并明确说明对于多批次文档，该窗口会随重索引时长扩大（批次越多，从第一次部分新版本写入到最终清理之间的时间越长），而不是无论文档大小都固定约 12µs。
 
-Add `pydantic.Field(ge=1, le=32)` to `embedding_concurrency` (32 is a
-generous ceiling — 8 already showed zero measured benefit over 4 per
-Sprint 14's benchmark; 32 just needs to be "clearly beyond any sane
-value" for the constraint to matter, not a tuned number) and
-`Field(gt=0)` to `filesystem_sync_interval_seconds` /
-`notion_sync_interval_seconds` (an interval of 0 or negative has no
-sane meaning for a periodic scheduler — `SyncScheduler`'s loop would
-either busy-spin or misbehave). Pydantic raises `ValidationError` at
-`Settings()` construction time, i.e. at process startup, which is the
-whole point — fail loud before the deadlock has a chance to happen, not
-after. Test: `EMBEDDING_CONCURRENCY=0` via `monkeypatch.setenv` +
-`pytest.raises` around `Settings()`, mirroring the existing
-`test_generation_provider_rejects_unknown_value` pattern already in
-`tests/test_config.py`.
+### 3. 配置校验
 
-### 4. UI citation-free distinction
+为 `embedding_concurrency` 增加 `pydantic.Field(ge=1, le=32)`（32 是一个宽裕的上限——Sprint 14 的 benchmark 已显示 8 相比 4 没有可测量收益；32 只需要明显超过任何合理值即可），为 `filesystem_sync_interval_seconds` / `notion_sync_interval_seconds` 增加 `Field(gt=0)`（周期调度器的间隔为 0 或负数没有合理含义——`SyncScheduler` 的循环会忙等或行为异常）。Pydantic 会在 `Settings()` 构造时抛出 `ValidationError`，也就是进程启动时；目标是在死锁发生前尽早失败。测试：通过 `monkeypatch.setenv` 设置 `EMBEDDING_CONCURRENCY=0`，并围绕 `Settings()` 使用 `pytest.raises`，仿照 `tests/test_config.py` 中已有的 `test_generation_provider_rejects_unknown_value` 模式。
 
-`app/ui/pages/chat.py`, the `if not grounding_event["has_citations"]:`
-branch: check `full_answer.strip() == NOT_FOUND_PHRASE` (imported from
-`app.llm.prompt`). If it matches, keep today's neutral `ℹ️ No relevant
-source found` framing (a legitimate "not found" answer needs no
-citations). If it doesn't match, switch to `⚠️ Answer contains no
-verifiable citations` — the model asserted something with zero
-citations backing it, which per `grounding.py`'s own docstring is "the
-most dangerous hallucination shape: no citation tag at all to even
-question." No test infrastructure exists for the Streamlit pages today
-(confirmed: no `tests/test_chat_page.py` or similar) — this is a
-plain-text branch change, verified by reading the diff and by real
-browser interaction (ask a question that legitimately has no answer in
-the corpus vs. one that provokes a no-citation non-`NOT_FOUND_PHRASE`
-response) rather than a unit test, consistent with how the rest of the
-Streamlit pages are verified in this project (browser only, no
-Streamlit-specific test harness was ever built).
+### 4. UI 中区分无引用答案
 
-### 5. Complete Qdrant schema validation
+在 `app/ui/pages/chat.py` 的 `if not grounding_event["has_citations"]:` 分支中：检查 `full_answer.strip() == NOT_FOUND_PHRASE`（从 `app.llm.prompt` 导入）。如果匹配，保持今天中性的 `ℹ️ No relevant source found` 表达（合法的“未找到”答案不需要引用）。如果不匹配，则切换为 `⚠️ Answer contains no verifiable citations`——模型在没有任何引用支持的情况下作出了断言；根据 `grounding.py` 自己的 docstring，这正是“最危险的幻觉形态：完全没有引用标签，甚至无从质疑”。目前没有针对 Streamlit 页面测试的基础设施（已确认不存在 `tests/test_chat_page.py` 或类似文件），通过真实浏览器交互验证即可。
 
-`ensure_collection()`: after confirming the sparse vector exists, also
-check `info.config.params.vectors[VECTOR_NAME].size == EMBEDDING_DIM`
-and `.distance == qmodels.Distance.COSINE`; raise the existing
-`UnexpectedCollectionSchemaError` (extended message) on either
-mismatch, same "don't touch it, tell the human" policy as the sparse
-check. Test-first against `QdrantClient(":memory:")`: create a
-collection with the right sparse config but a wrong dense size (e.g.
-384 instead of 768), assert `ensure_collection()` raises without
-deleting; same for wrong distance metric (e.g. `EUCLID` instead of
-`COSINE`).
+### 5. 完整的 Qdrant schema 校验
 
-### 6. Failure-safe shutdown
+`ensure_collection()`：确认稀疏向量存在后，还要检查 `info.config.params.vectors[VECTOR_NAME].size == EMBEDDING_DIM` 以及 `.distance == qmodels.Distance.COSINE`；任一不匹配都抛出已有的 `UnexpectedCollectionSchemaError`（扩展错误消息），与稀疏配置检查保持同样的策略。测试先行，使用 `QdrantClient(":memory:")`：创建稀疏配置正确但稠密尺寸错误（例如 384 而非 768）的集合，断言 `ensure_collection()` 抛异常且不会删除集合；距离度量错误（例如 `EUCLID` 而不是 `COSINE`）同样测试。
 
-`app/main.py`'s `lifespan`: wrap each `on_shutdown` hook call in its
-own try/except, logging (not raising) on failure, so one broken hook
-can't block the rest from running. Test-first
-(`tests/test_app_lifespan.py`, extending the Sprint 15 pattern): a
-hook list `[raising_hook, tracking_hook]` where the first raises —
-assert `tracking_hook` still ran. `app/wiring.py::build_app()`: add
-`qdrant_client` to the `on_shutdown` list via a small async wrapper
-(`QdrantClient.close()` is sync) so all four real long-lived clients
-(Ollama embed, chat provider, Notion, Qdrant) get closed on shutdown,
-not three.
+### 6. 安全失败的关停
 
-### 7. README consistency fixes
+`app/main.py` 的 `lifespan`：将每个 `on_shutdown` hook 的调用分别包在 try/except 中，失败时记录日志但不抛出，这样一个损坏的 hook 不会阻止其余 hook 运行。测试先行（`tests/test_app_lifespan.py`，扩展 Sprint 15 的模式）：hook 列表为 `[raising_hook, tracking_hook]`，第一个抛异常；断言 `tracking_hook` 仍然运行。`app/wiring.py::build_app()`：通过一个小型异步包装器将 `qdrant_client` 加入 `on_shutdown` 列表（`QdrantClient.close()` 是同步的），这样四个真实的长生命周期客户端（Ollama embed、chat provider、Notion、Qdrant）都会在关停时关闭。
 
-Intro paragraph: rephrase to "PDF, Markdown, and Notion through a
-shared `Connector` interface, plus a standalone web-page parser
-(`app/parsing/web_parser.py`) not yet wired into a connector" — stops
-implying Confluence exists and stops implying the web parser has sync
-support it doesn't. `## Status`: "Sprints 0–11 complete" → "Sprints
-0–15 complete", with the bullet list re-checked against what's actually
-true today (tracing, evaluation, UI, Docker Compose, grounding fix,
-CI, versioned re-index, embedding concurrency, ADRs/shutdown-hooks —
-all real, all already covered by their own README sections elsewhere,
-so the Status bullets just need the count and any since-changed claims
-fixed, not a rewrite).
+### 7. README 一致性修复
 
-### 8. Benchmark methodology hardening
+简介段落：改写为“通过共享的 `Connector` 接口处理 PDF、Markdown 和 Notion，另有尚未接入 connector 的独立网页解析器（`app/parsing/web_parser.py`）”——停止暗示 Confluence 已存在，也停止暗示网页解析器已经具备同步支持。`## Status`：将“Sprints 0–11 complete”改为“Sprints 0–15 complete”，并重新核对项目符号列表是否符合当前事实（tracing、evaluation、UI、Docker Compose、grounding 修复、CI、版本化重索引、嵌入并发、ADR/关停 hooks 都是真实存在的，因此 Status 项目符号只需修正数量和已变化的说法）。
 
-`scripts/benchmarks/benchmark_embedding_concurrency.py`: add one untimed warmup
-call per chunk-count before the timed runs (rules out first-request
-connection/model-load overhead skewing concurrency=1's numbers low);
-run each (chunk_count, concurrency) pair 3 times and report
-mean/median/stddev, not a single sample; use `random.shuffle` on the
-concurrency-level order per chunk-count-and-repeat (rules out any
-monotonic drift across the whole script's runtime being misattributed
-to concurrency itself). This is a **manual, Ollama-requiring script**
-(same as Sprint 14 — CI has no Ollama), so it is run for real against
-native Ollama during this sprint if available, exactly like Sprint 14
-did; if it isn't reachable at implementation time, that's stated
-explicitly and honestly in the closing note (not silently skipped) and
-the README table is left with a note that the stats-hardened numbers
-are pending a re-run, rather than fabricating variance figures.
+### 8. 加固 benchmark 方法
 
-### 9. CI lint scope
+`scripts/benchmarks/benchmark_embedding_concurrency.py`：在每个 chunk-count 的计时运行前增加一次不计时的预热调用（排除第一次请求的连接/模型加载开销）；每个（chunk_count, concurrency）组合运行 3 次并报告均值/中位数/标准差，而不是单个样本；对于每个 chunk-count-and-repeat，使用 `random.shuffle` 随机化并发级别的顺序（排除整个脚本运行过程中单调漂移被错误归因于并发）。这是一个**需要 Ollama 的手动脚本**（与 Sprint 14 一样——CI 没有 Ollama），本 sprint 如果原生 Ollama 可用就实际运行；如果无法访问，要在收尾记录中明确写出，README 表格保持等待重新运行的注记，而不是编造方差数字。
 
-`.github/workflows/ci.yml`: `ruff check app tests` → `ruff check app
-tests scripts`. Run `ruff check scripts` locally first to fix whatever
-it finds before landing the workflow change, so CI doesn't immediately
-go red on the next push.
+### 9. CI lint 范围
 
-## Rules carried over
+`.github/workflows/ci.yml`：将 `ruff check app tests` 改为 `ruff check app tests scripts`。提交 workflow 改动前先在本地运行 `ruff check scripts` 并修复其发现的问题，避免下一次 push 立即让 CI 变红。
 
-- Test-first, especially item 1's rollback test — it's the one thing
-  this sprint cannot get away with asserting from reading code alone.
-- No AI co-author line in commits.
-- Closing note must include: the real new duplicate-window measurement
-  (a number, not "roughly the same"), the rollback behavior's proof,
-  and the benchmark's actual new result (or an honest "Ollama
-  unreachable, not re-run" if that's what happened).
+## 延续规则
 
-## Definition of Done
+- 测试先行，尤其是第 1 项的回滚测试——这是本 sprint 唯一不能只靠读代码断言的部分。
+- 提交中不得加入 AI co-author 行。
+- 收尾记录必须包含：真实的新重复窗口测量值（一个数字，而不是“差不多”）、回滚行为的证明，以及 benchmark 的实际新结果（或者诚实说明“Ollama 无法访问，未重新运行”）。
 
-Multi-batch partial failure scenario is proven to roll back
-(test-verified, not just implemented); duplicate window re-measured
-with a real multi-batch document; config validation rejects
-out-of-range values at startup; UI distinguishes citation-free
-NOT_FOUND from citation-free-and-not: the latter now warns; Qdrant
-schema validation checks dense dim + distance, not just sparse
-presence; shutdown hooks are failure-isolated and `QdrantClient` is
-among them; README's connector claims and Status sprint count are
-accurate; benchmark methodology has repeats/warmup/randomization and
-reports variance; CI lints `scripts/` too; full suite + `ruff` clean.
+## 完成定义
+
+多批次部分失败场景已被证明能够回滚（通过测试验证，而不是只实现）；重复窗口已用真实多批次文档重新测量；配置校验会在启动时拒绝超范围值；UI 能区分无引用的 NOT_FOUND 与无引用且并非 NOT_FOUND 的答案：后者现在会警告；Qdrant schema 校验检查稠密维度和距离，而不只是稀疏向量是否存在；关停 hook 彼此隔离失败，且 `QdrantClient` 在其中；README 的 connector 说法和 Status sprint 数量准确；benchmark 方法包含重复、预热、随机化并报告方差；CI 也对 `scripts/` 做 lint；完整测试套件和 `ruff` 均干净。
