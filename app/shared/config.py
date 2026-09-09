@@ -123,7 +123,16 @@ class Settings(BaseSettings):
     # can be added later without touching call sites that only care about
     # embedding.
     generation_provider: Literal["ollama", "claude", "openai", "deepseek"] = "deepseek"
-    embedding_provider: Literal["ollama"] = "ollama"
+    embedding_provider: Literal["ollama", "siliconflow"] = "ollama"
+
+    # Remote embedding alternative. The default remains Ollama for backward
+    # compatibility; deployment configuration selects SiliconFlow explicitly.
+    siliconflow_api_key: str | None = None
+    siliconflow_base_url: str = "https://api.siliconflow.cn/v1"
+    siliconflow_embed_model: str = "Qwen/Qwen3-Embedding-4B"
+    siliconflow_connect_timeout_seconds: float = Field(default=10.0, gt=0)
+    siliconflow_read_timeout_seconds: float = Field(default=180.0, gt=0)
+    siliconflow_overall_timeout_seconds: float = Field(default=240.0, gt=0)
 
     # The single source of truth for which embedding model
     # actually serves production traffic — every other embedding

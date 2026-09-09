@@ -6,16 +6,23 @@ configured, Qdrant is reachable, the embedding backend is reachable, and
 the configured model is present in its model list.
 """
 
+from typing import Protocol
+
 from qdrant_client import QdrantClient
 
 from app.llm.embedding_models import active_embedding_config
-from app.llm.ollama_client import OllamaClient, OllamaUnreachableError
 from app.migration.aliasing import resolve_active_collection_name
 from app.shared.config import Settings
 
 
+class ModelListingEmbeddingProvider(Protocol):
+    async def list_models(self) -> list[str]: ...
+
+
 async def check_readiness(
-    qdrant_client: QdrantClient, ollama: OllamaClient, settings: Settings
+    qdrant_client: QdrantClient,
+    embedding_provider: ModelListingEmbeddingProvider,
+    settings: Settings,
 ) -> dict:
     checks: dict[str, bool] = {}
     detail: dict[str, str] = {}
@@ -50,9 +57,9 @@ async def check_readiness(
     checks["expected_dense_dimension"] = dimension_ok
 
     try:
-        models = await ollama.list_models()
+        models = await embedding_provider.list_models()
         checks["embedding_backend_reachable"] = True
-    except OllamaUnreachableError as exc:
+    except Exception as exc:  # noqa: BLE001 - readiness must report backend failures
         checks["embedding_backend_reachable"] = False
         detail["embedding_backend_reachable"] = str(exc)
         models = []
@@ -61,7 +68,7 @@ async def check_readiness(
     checks["configured_model_available"] = model_available
     if not model_available and checks["embedding_backend_reachable"]:
         detail["configured_model_available"] = (
-            f"{embed_config.ollama_model!r} not found in Ollama's model list"
+            f"{embed_config.ollama_model!r} not found in the embedding provider's model list"
         )
 
     ready = all(checks.values())

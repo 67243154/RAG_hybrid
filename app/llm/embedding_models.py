@@ -161,9 +161,17 @@ def active_embedding_config(settings: Settings) -> EmbeddingModelConfig:
     instead of each hardcoding "nomic" or duplicating model/instruction
     strings of its own.
     """
-    return get_embedding_model_config(
+    config = get_embedding_model_config(
         settings.embedding_model_key, settings, output_dimension=settings.embedding_output_dimension
     )
+    if settings.embedding_provider == "siliconflow":
+        return replace(
+            config,
+            ollama_model=settings.siliconflow_embed_model,
+            revision="siliconflow-api",
+            backend="siliconflow",
+        )
+    return config
 
 
 def parse_config_token(token: str, settings: Settings) -> EmbeddingModelConfig:

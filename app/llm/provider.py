@@ -89,11 +89,22 @@ def get_chat_provider(settings: Settings) -> ChatProvider:
 
 
 def get_embedding_provider(settings: Settings) -> EmbeddingProvider:
-    # Only Ollama today (see docs/sprint-01-plan.md's embedding/generation
-    # decision) — settings.embedding_provider is a single-value Literal so
-    # there is nothing to branch on yet, but callers still go through this
-    # factory rather than constructing OllamaProvider directly, so adding a
-    # second embedding backend later won't require call-site changes.
+    if settings.embedding_provider == "siliconflow":
+        from app.llm.siliconflow_embedding import SiliconFlowEmbeddingClient
+
+        if not settings.siliconflow_api_key:
+            raise ValueError(
+                "settings.siliconflow_api_key must be set to use "
+                "embedding_provider='siliconflow'"
+            )
+        return SiliconFlowEmbeddingClient(
+            api_key=settings.siliconflow_api_key,
+            base_url=settings.siliconflow_base_url,
+            connect_timeout=settings.siliconflow_connect_timeout_seconds,
+            timeout=settings.siliconflow_read_timeout_seconds,
+            overall_timeout=settings.siliconflow_overall_timeout_seconds,
+        )
+
     from app.llm.ollama_provider import OllamaProvider
 
     return OllamaProvider(

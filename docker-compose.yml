@@ -26,22 +26,25 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # Ollama stays native on the host (Metal GPU passthrough isn't
-      # available to Docker Desktop on macOS, see docs/sprint-11-plan.md)
-      # — reached from the container via host.docker.internal. qdrant/
-      # jaeger use their in-compose service names, not localhost.
-      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      # Original local Ollama embedding transport is retained for rollback:
+      # - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       - QDRANT_URL=http://qdrant:6333
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - JAEGER_PUBLIC_URL=${JAEGER_PUBLIC_URL:-http://localhost:16686}
       - GENERATION_PROVIDER=${GENERATION_PROVIDER:-deepseek}
-      - EMBEDDING_PROVIDER=ollama
+      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-siliconflow}
+      - SILICONFLOW_API_KEY=${SILICONFLOW_API_KEY:-}
+      - SILICONFLOW_BASE_URL=${SILICONFLOW_BASE_URL:-https://api.siliconflow.cn/v1}
+      - SILICONFLOW_EMBED_MODEL=${SILICONFLOW_EMBED_MODEL:-Qwen/Qwen3-Embedding-4B}
+      - EMBEDDING_MODEL_KEY=${EMBEDDING_MODEL_KEY:-qwen3-4b}
+      - EMBEDDING_OUTPUT_DIMENSION=${EMBEDDING_OUTPUT_DIMENSION:-1024}
       - CHUNKING_MODE=${CHUNKING_MODE:-token_aware}
       - CHUNK_TARGET_TOKENS=${CHUNK_TARGET_TOKENS:-512}
       - CHUNK_OVERLAP_TOKENS=${CHUNK_OVERLAP_TOKENS:-64}
       - CHUNK_HARD_MAX_TOKENS=${CHUNK_HARD_MAX_TOKENS:-576}
       - CHUNK_TOKENIZER_MODEL=${CHUNK_TOKENIZER_MODEL:-Qwen/Qwen3-Embedding-4B}
       - CHUNK_TOKENIZER_REVISION=${CHUNK_TOKENIZER_REVISION:-main}
+      - PIPELINE_V2_CONTEXT_TOKEN_BUDGET=${PIPELINE_V2_CONTEXT_TOKEN_BUDGET:-2000}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
       - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
       - DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-v4-flash}
@@ -54,6 +57,7 @@ services:
       # from the registry_data named volume below (non-overlapping mount
       # points — see docs/sprint-11-plan.md for why).
       - FILESYSTEM_ROOT_PATH=documents
+      - FILESYSTEM_SYNC_INTERVAL_SECONDS=${FILESYSTEM_SYNC_INTERVAL_SECONDS:-300}
       # Optional — unset means the Notion connector simply isn't wired in
       # (app/wiring.py::build_connectors), same as running on the host.
       - NOTION_API_KEY=${NOTION_API_KEY:-}

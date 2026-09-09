@@ -18,9 +18,11 @@ from app.llm.generate import stream_answer
 from app.llm.ollama_client import OllamaClient
 from app.llm.provider import (
     ChatProvider,
+    EmbeddingProvider,
     default_chat_model,
     default_embed_model,
     get_chat_provider,
+    get_embedding_provider,
 )
 from app.llm.structured_output import stream_evidence_backed_answer, stream_support_unit_answer
 from app.main import create_app
@@ -91,7 +93,7 @@ def connector_tenant_ids(settings: Settings) -> dict[str, str]:
 def build_chat_dependencies(
     settings: Settings,
     qdrant_client: QdrantClient,
-    ollama: OllamaClient,
+    ollama: EmbeddingProvider,
     sparse_encoder: SparseEncoder,
     collection_name: str,
 ) -> tuple[ChatDependencies, ChatProvider]:
@@ -112,6 +114,11 @@ def build_chat_dependencies(
     embed_config = active_embedding_config(settings)
     semantic_evaluator = None
     if settings.semantic_answerability_enabled and settings.semantic_answerability_shadow:
+        if not isinstance(ollama, OllamaClient):
+            raise ValueError(
+                "semantic answerability evaluation currently requires an Ollama embedding "
+                "provider; disable SEMANTIC_ANSWERABILITY_ENABLED when using SiliconFlow"
+            )
         semantic_evaluator = OllamaSemanticEvaluator(
             ollama,
             model=settings.answerability_eval_model,
@@ -262,12 +269,7 @@ def build_app(settings: Settings) -> FastAPI:
     """
     setup_tracing(endpoint=settings.otel_exporter_otlp_endpoint)
 
-    ollama = OllamaClient(
-        base_url=settings.ollama_base_url,
-        connect_timeout=settings.ollama_connect_timeout_seconds,
-        timeout=settings.ollama_read_timeout_seconds,
-        overall_timeout=settings.ollama_overall_timeout_seconds,
-    )
+    embedding_provider = get_embedding_provider(settings)
     qdrant_client = QdrantClient(url=settings.qdrant_url)
 
     # Fail fast if the configured embedding dimension doesn't
@@ -301,7 +303,7 @@ def build_app(settings: Settings) -> FastAPI:
     connectors = build_connectors(settings)
 
     async def embed_fn(text: str) -> list[float]:
-        return await ollama.embed(
+        return await embedding_provider.embed(
             text,
             model=embed_config.ollama_model,
             prefix=embed_config.document_prefix(),
@@ -326,12 +328,12 @@ def build_app(settings: Settings) -> FastAPI:
         chunking_config=settings.chunking_config(),
     )
     chat_deps, chat_provider = build_chat_dependencies(
-        settings, qdrant_client, ollama, sparse_encoder, collection_name
+        settings, qdrant_client, embedding_provider, sparse_encoder, collection_name
     )
     scheduler = SyncScheduler(manager, sync_intervals_from_settings(settings))
 
     async def readiness_check() -> dict:
-        return await check_readiness(qdrant_client, ollama, settings)
+        return await check_readiness(qdrant_client, embedding_provider, settings)
 
     # Security boundary wiring. auth_enabled defaults True —
     # False is a real, explicit escape hatch (see app/api/deps.py) that
@@ -358,7 +360,7 @@ def build_app(settings: Settings) -> FastAPI:
     async def close_qdrant_client() -> None:
         qdrant_client.close()
 
-    on_shutdown = [ollama.aclose, chat_provider.aclose, close_qdrant_client]
+    on_shutdown = [embedding_provider.aclose, chat_provider.aclose, close_qdrant_client]
     for connector in connectors.values():
         if hasattr(connector, "aclose"):
             on_shutdown.append(connector.aclose)
@@ -368,7 +370,9 @@ def build_app(settings: Settings) -> FastAPI:
         history,
         registry,
         chat_deps=chat_deps,
-        list_ollama_models=ollama.list_models,
+        # Kept under the legacy route/state name for API compatibility; it
+        # now lists models from whichever embedding backend is configured.
+        list_ollama_models=embedding_provider.list_models,
         scheduler=scheduler,
         on_shutdown=on_shutdown,
         readiness_check=readiness_check,
