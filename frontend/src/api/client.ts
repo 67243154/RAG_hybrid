@@ -47,7 +47,7 @@ async function request<T>(
   const token = getToken()
   const headers = new Headers(init.headers)
   if (token) headers.set("Authorization", `Bearer ${token}`)
-  if (init.body && !headers.has("Content-Type")) {
+  if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json")
   }
 
@@ -73,4 +73,6 @@ export const api = {
   get: <T>(path: string) => request<T>(path, { method: "GET" }),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: "POST", body: body ? JSON.stringify(body) : undefined }),
+  postForm: <T>(path: string, body: FormData) => request<T>(path, { method: "POST", body }),
+  delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
 }

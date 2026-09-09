@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.chat import ChatDependencies
 from app.api.chat import router as chat_router
+from app.api.files import router as files_router
 from app.api.health import ListModelsFn
 from app.api.health import router as health_router
 from app.api.sources import router as sources_router
@@ -124,6 +125,7 @@ def create_app(
     app.include_router(sync_router)
     app.include_router(sources_router)
     app.include_router(chat_router)
+    app.include_router(files_router)
     app.include_router(health_router)
     app.include_router(ui_router)
 
@@ -138,7 +140,7 @@ def create_app(
             CORSMiddleware,
             allow_origins=cors_origins,
             allow_credentials=False,
-            allow_methods=["GET", "POST"],
+            allow_methods=["GET", "POST", "DELETE"],
             allow_headers=["Authorization", "Content-Type"],
         )
     return app

@@ -19,7 +19,7 @@ vi.mock("@/api/health", () => ({
   authApi: { identity: vi.fn() },
 }))
 vi.mock("@/api/sources", () => ({
-  sourcesApi: { list: vi.fn(), documents: vi.fn() },
+  sourcesApi: { list: vi.fn(), documents: vi.fn(), upload: vi.fn(), remove: vi.fn() },
 }))
 vi.mock("@/api/sync", () => ({
   syncApi: { allRuns: vi.fn(), trigger: vi.fn(), history: vi.fn() },
@@ -80,6 +80,33 @@ beforeEach(() => {
   vi.mocked(useIdentity).mockReturnValue({ data: user } as ReturnType<typeof useIdentity>)
   vi.mocked(sourcesApi.list).mockResolvedValue([])
   vi.mocked(sourcesApi.documents).mockResolvedValue([])
+  vi.mocked(sourcesApi.upload).mockResolvedValue({
+    action: "uploaded",
+    filename: "new.md",
+    source_id: "new_md",
+    size_bytes: 3,
+    sync: {
+      source_type: "filesystem",
+      status: "success",
+      run_id: 2,
+      error: null,
+      stats: null,
+      trace_id: "trace-upload",
+    },
+  })
+  vi.mocked(sourcesApi.remove).mockResolvedValue({
+    action: "deleted",
+    filename: "tenant-a.md",
+    source_id: "tenant-a.md",
+    sync: {
+      source_type: "filesystem",
+      status: "success",
+      run_id: 3,
+      error: null,
+      stats: null,
+      trace_id: "trace-delete",
+    },
+  })
   vi.mocked(syncApi.allRuns).mockResolvedValue([])
   vi.mocked(syncApi.trigger).mockResolvedValue({
     source_type: "filesystem",
@@ -150,6 +177,44 @@ describe("console page regression states", () => {
     fireEvent.click(await screen.findByRole("button", { name: /本地文件/i }))
     expect(await screen.findByText("tenant-a.md")).toBeInTheDocument()
     expect(screen.getByText("—")).toBeInTheDocument()
+  })
+
+  it("lets an operator add and delete local files from the Knowledge page", async () => {
+    vi.mocked(useIdentity).mockReturnValue({ data: operator } as ReturnType<typeof useIdentity>)
+    vi.mocked(sourcesApi.list).mockResolvedValue([
+      { source_type: "filesystem", document_count: 1, is_running: false },
+    ])
+    vi.mocked(sourcesApi.documents).mockResolvedValue([
+      {
+        tenant_id: "tenant-a",
+        source_type: "filesystem",
+        source_id: "tenant-a.md",
+        content_hash: "hash-a",
+        version: 1,
+        status: "healthy",
+        chunk_count: 1,
+        pipeline_fingerprint: null,
+        last_synced_at: new Date().toISOString(),
+      },
+    ])
+    vi.spyOn(window, "confirm").mockReturnValue(true)
+
+    const { container } = renderWithClient(<Knowledge />)
+    fireEvent.click(await screen.findByRole("button", { name: /本地文件/i }))
+
+    const uploadInput = container.querySelector<HTMLInputElement>('input[type="file"]')!
+    const uploadFile = new File(["new"], "new.md", { type: "text/markdown" })
+    fireEvent.change(uploadInput, { target: { files: [uploadFile] } })
+    await waitFor(() =>
+      expect(sourcesApi.upload).toHaveBeenCalledWith(uploadFile, expect.anything()),
+    )
+    expect(await screen.findByText(/new.md.*已添加并完成索引/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: /删除 tenant-a.md/i }))
+    await waitFor(() =>
+      expect(sourcesApi.remove).toHaveBeenCalledWith("tenant-a.md", expect.anything()),
+    )
+    expect(await screen.findByText(/tenant-a.md.*已删除/)).toBeInTheDocument()
   })
 
   it("keeps sync action hidden for USER and visible for OPERATOR", async () => {

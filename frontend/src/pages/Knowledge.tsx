@@ -1,7 +1,7 @@
 import { displayLabel } from "@/lib/labels"
-import { useQuery } from "@tanstack/react-query"
-import { ChevronRight, Database, FileText } from "lucide-react"
-import { useState } from "react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { ChevronRight, Database, FileText, Plus, Trash2, Upload } from "lucide-react"
+import { useRef, useState } from "react"
 
 import { classifyError } from "@/api/client"
 import { sourcesApi } from "@/api/sources"
@@ -11,6 +11,8 @@ import { ErrorState } from "@/components/ErrorState"
 import { LoadingRows } from "@/components/LoadingSkeleton"
 import { StatusBadge } from "@/components/StatusBadge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { useIdentity } from "@/hooks/useIdentity"
 import { formatRelativeTime } from "@/lib/utils"
 
 function DocumentDetail({ doc, onClose }: { doc: DocumentRecord; onClose: () => void }) {
@@ -50,9 +52,13 @@ function DocumentDetail({ doc, onClose }: { doc: DocumentRecord; onClose: () => 
 }
 
 export default function Knowledge() {
+  const queryClient = useQueryClient()
+  const { data: identity } = useIdentity()
   const [selectedSourceType, setSelectedSourceType] = useState<string | null>(null)
   const [selectedDoc, setSelectedDoc] = useState<DocumentRecord | null>(null)
   const [search, setSearch] = useState("")
+  const [feedback, setFeedback] = useState<{ kind: "success" | "error"; text: string } | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const sources = useQuery({ queryKey: ["sources"], queryFn: sourcesApi.list })
   const documents = useQuery({
@@ -60,6 +66,44 @@ export default function Knowledge() {
     queryFn: () => sourcesApi.documents(selectedSourceType ?? undefined),
     enabled: Boolean(selectedSourceType),
   })
+  const refreshKnowledge = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["sources"] }),
+      queryClient.invalidateQueries({ queryKey: ["documents", "filesystem"] }),
+      queryClient.invalidateQueries({ queryKey: ["sync-runs"] }),
+    ])
+  }
+  const upload = useMutation({
+    mutationFn: sourcesApi.upload,
+    onSuccess: async (result) => {
+      setFeedback({
+        kind: result.sync.status === "success" ? "success" : "error",
+        text:
+          result.sync.status === "success"
+            ? `“${result.filename}”已添加并完成索引。`
+            : `“${result.filename}”已添加，索引任务状态：${displayLabel(result.sync.status)}。`,
+      })
+      await refreshKnowledge()
+    },
+    onError: (error: Error) => setFeedback({ kind: "error", text: error.message }),
+  })
+  const remove = useMutation({
+    mutationFn: sourcesApi.remove,
+    onSuccess: async (result) => {
+      setSelectedDoc((current) => (current?.source_id === result.source_id ? null : current))
+      setFeedback({
+        kind: result.sync.status === "success" ? "success" : "error",
+        text:
+          result.sync.status === "success"
+            ? `“${result.filename}”已删除，相关索引已清理。`
+            : `“${result.filename}”已删除，索引任务状态：${displayLabel(result.sync.status)}。`,
+      })
+      await refreshKnowledge()
+    },
+    onError: (error: Error) => setFeedback({ kind: "error", text: error.message }),
+  })
+
+  const canManageLocalFiles = selectedSourceType === "filesystem" && identity?.can_sync === true
 
   if (sources.isLoading) {
     return (
@@ -119,14 +163,55 @@ export default function Knowledge() {
         <Card>
           <CardHeader className="flex-row items-center justify-between space-y-0">
             <CardTitle className="capitalize">{displayLabel(selectedSourceType)} 文档</CardTitle>
-            <input
-              placeholder="按名称筛选…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-48 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-2 py-1 text-xs text-[var(--color-foreground)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
-            />
+            <div className="flex items-center gap-2">
+              <input
+                placeholder="按名称筛选…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-48 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-2 py-1.5 text-xs text-[var(--color-foreground)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+              />
+              {selectedSourceType === "filesystem" && (
+                <>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".pdf,.md,application/pdf,text/markdown"
+                    className="sr-only"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0]
+                      event.target.value = ""
+                      if (file) {
+                        setFeedback(null)
+                        upload.mutate(file)
+                      }
+                    }}
+                  />
+                  <Button
+                    size="sm"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={!canManageLocalFiles || upload.isPending || remove.isPending}
+                    title={canManageLocalFiles ? "添加 PDF 或 Markdown 文件" : "需要操作员权限"}
+                  >
+                    {upload.isPending ? <Upload className="h-3.5 w-3.5 animate-pulse" /> : <Plus className="h-3.5 w-3.5" />}
+                    {upload.isPending ? "添加中…" : "添加文件"}
+                  </Button>
+                </>
+              )}
+            </div>
           </CardHeader>
           <CardContent>
+            {feedback && (
+              <div
+                role="status"
+                className={`mb-3 rounded-md border px-3 py-2 text-xs ${
+                  feedback.kind === "success"
+                    ? "border-[var(--color-success)]/30 bg-[var(--color-success-muted)] text-[var(--color-success)]"
+                    : "border-[var(--color-error)]/30 bg-[var(--color-error-muted)] text-[var(--color-error)]"
+                }`}
+              >
+                {feedback.text}
+              </div>
+            )}
             {documents.isLoading ? (
               <LoadingRows rows={4} />
             ) : filteredDocs.length === 0 ? (
@@ -139,7 +224,7 @@ export default function Knowledge() {
                     <th className="py-2 font-medium">版本</th>
                     <th className="py-2 font-medium">分块数</th>
                     <th className="py-2 font-medium">状态</th>
-                    <th className="py-2 font-medium">更新时间</th>
+                    <th className="py-2 font-medium">更新时间 / 操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -162,7 +247,30 @@ export default function Knowledge() {
                         <StatusBadge status={doc.status} />
                       </td>
                       <td className="py-2 text-[var(--color-subtle-foreground)]">
-                        {formatRelativeTime(doc.last_synced_at)}
+                        <div className="flex items-center justify-between gap-2">
+                          <span>{formatRelativeTime(doc.last_synced_at)}</span>
+                          {doc.source_type === "filesystem" && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 px-2 text-[var(--color-error)] hover:bg-[var(--color-error-muted)] hover:text-[var(--color-error)]"
+                              disabled={!canManageLocalFiles || remove.isPending || upload.isPending}
+                              aria-label={`删除 ${doc.source_id}`}
+                              title={canManageLocalFiles ? `删除 ${doc.source_id}` : "需要操作员权限"}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                if (window.confirm(`确定删除“${doc.source_id}”吗？删除后相关索引也会被清理。`)) {
+                                  setFeedback(null)
+                                  remove.mutate(doc.source_id)
+                                }
+                              }}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              删除
+                            </Button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}

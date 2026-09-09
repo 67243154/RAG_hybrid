@@ -11,7 +11,7 @@ from app.sync.models import STATUS_REJECTED, TRIGGER_MANUAL
 router = APIRouter(prefix="/sync", tags=["sync"])
 
 
-def _require_owned_source_type(request: Request, source_type: str, user: UserContext) -> None:
+def require_owned_source_type(request: Request, source_type: str, user: UserContext) -> None:
     """Sprint 23: refuses (403) a sync/history request for a source_type
     that isn't owned by the caller's own tenant — server-side
     configuration (app.state.tenant_ids), never the request. A
@@ -82,7 +82,7 @@ async def trigger_sync(
     source_type belonging to tenant B, even if both happen to use the
     same source_type name (e.g. both configured "filesystem").
     """
-    _require_owned_source_type(request, source_type, user)
+    require_owned_source_type(request, source_type, user)
     manager = request.app.state.sync_manager
     try:
         result = await manager.trigger_sync(source_type, TRIGGER_MANUAL)
@@ -106,6 +106,6 @@ async def sync_history(
     — sync history (file counts, error messages) is operational detail
     that shouldn't leak across tenants either.
     """
-    _require_owned_source_type(request, source_type, user)
+    require_owned_source_type(request, source_type, user)
     history = request.app.state.sync_history
     return [_run_body(run) for run in history.list_runs(source_type=source_type, limit=limit)]

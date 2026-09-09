@@ -34,7 +34,7 @@ export interface SourceSummary {
 
 export interface SyncResult {
   source_type: string
-  status: "success" | "error" | "rejected" | "cancelled"
+  status: "success" | "error" | "rejected" | "rejected_already_running" | "cancelled"
   run_id: number | null
   error: string | null
   stats: {
@@ -136,6 +136,14 @@ export interface DocumentRecord {
   chunk_count: number | null
   pipeline_fingerprint: string | null
   last_synced_at: string
+}
+
+export interface FileMutationResult {
+  action: "uploaded" | "deleted"
+  filename: string
+  source_id: string
+  size_bytes?: number
+  sync: SyncResult
 }
 
 export interface UiSettings {
