@@ -131,7 +131,10 @@ class SyncManager:
             try:
                 # Keep run creation inside the guarded region so a failed
                 # SQLite insert cannot leave the source marked as running.
-                run_id = self._history.start_run(source_type, trigger, trace_id=trace_id)
+                # The span exists because this fsync'd INSERT is otherwise a
+                # ~12ms hole at the head of the sync_run trace.
+                with self._tracer.start_as_current_span("record_run_start"):
+                    run_id = self._history.start_run(source_type, trigger, trace_id=trace_id)
                 stats = await ingest_connector(
                     self._connectors[source_type],
                     self._store,
@@ -194,14 +197,17 @@ class SyncManager:
                 )
             else:
                 span.set_attribute("sync.status", STATUS_SUCCESS)
-                self._history.finish_run(
-                    run_id,
-                    status=STATUS_SUCCESS,
-                    files_processed=stats.files_processed,
-                    files_skipped=stats.files_skipped,
-                    files_deleted=stats.files_deleted,
-                    chunks_upserted=stats.chunks_upserted,
-                )
+                # Span for the same reason as record_run_start: the fsync'd
+                # UPDATE leaves a ~12ms hole at the tail of the trace.
+                with self._tracer.start_as_current_span("record_run_finish"):
+                    self._history.finish_run(
+                        run_id,
+                        status=STATUS_SUCCESS,
+                        files_processed=stats.files_processed,
+                        files_skipped=stats.files_skipped,
+                        files_deleted=stats.files_deleted,
+                        chunks_upserted=stats.chunks_upserted,
+                    )
                 return SyncRunResult(
                     source_type=source_type,
                     status=STATUS_SUCCESS,

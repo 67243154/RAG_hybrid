@@ -119,8 +119,10 @@ def test_generation_provider_defaults_to_deepseek():
     assert Settings().generation_provider == "deepseek"
 
 
-def test_deepseek_generation_defaults_are_configured():
-    settings = Settings()
+def test_deepseek_generation_defaults_are_configured(monkeypatch):
+    monkeypatch.delenv("DEEPSEEK_BASE_URL", raising=False)
+    monkeypatch.delenv("DEEPSEEK_MODEL", raising=False)
+    settings = Settings(_env_file=None)
 
     assert settings.deepseek_base_url == "https://api.deepseek.com"
     assert settings.deepseek_model == "deepseek-v4-flash"
@@ -144,7 +146,8 @@ def test_dev_fast_profile_selects_qwen35_without_thinking():
     assert settings.reranker_candidate_k == 15
 
 
-def test_default_dev_fast_profile_uses_local_candidate_budget():
+def test_default_dev_fast_profile_uses_local_candidate_budget(monkeypatch):
+    monkeypatch.delenv("RERANKER_CANDIDATE_K", raising=False)
     settings = Settings(_env_file=None)
 
     assert settings.runtime_profile == "DEV_FAST"
@@ -170,8 +173,16 @@ def test_reranker_candidate_k_cannot_be_smaller_than_top_n():
         Settings(_env_file=None, reranker_candidate_k=4, reranker_top_n=5)
 
 
-def test_embedding_provider_defaults_to_ollama():
-    assert Settings().embedding_provider == "ollama"
+def test_embedding_provider_defaults_to_ollama(monkeypatch):
+    monkeypatch.delenv("EMBEDDING_PROVIDER", raising=False)
+
+    assert Settings(_env_file=None).embedding_provider == "ollama"
+
+
+def test_embedding_provider_accepts_siliconflow():
+    settings = Settings(_env_file=None, embedding_provider="siliconflow")
+
+    assert settings.embedding_provider == "siliconflow"
 
 
 def test_generation_provider_overridable_to_claude(monkeypatch):
@@ -196,8 +207,10 @@ def test_generation_provider_rejects_unknown_value(monkeypatch):
         Settings()
 
 
-def test_claude_api_key_defaults_to_none():
-    assert Settings().claude_api_key is None
+def test_claude_api_key_defaults_to_none(monkeypatch):
+    monkeypatch.delenv("CLAUDE_API_KEY", raising=False)
+
+    assert Settings(_env_file=None).claude_api_key is None
 
 
 def test_claude_model_has_a_default():
@@ -208,8 +221,10 @@ def test_registry_db_path_has_a_default():
     assert Settings().registry_db_path == "data/registry.db"
 
 
-def test_filesystem_sync_interval_defaults_to_five_minutes():
-    assert Settings().filesystem_sync_interval_seconds == 300.0
+def test_filesystem_sync_interval_defaults_to_five_minutes(monkeypatch):
+    monkeypatch.delenv("FILESYSTEM_SYNC_INTERVAL_SECONDS", raising=False)
+
+    assert Settings(_env_file=None).filesystem_sync_interval_seconds == 300.0
 
 
 def test_notion_sync_interval_defaults_to_thirty_minutes():

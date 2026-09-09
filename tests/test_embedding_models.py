@@ -179,9 +179,31 @@ def test_active_embedding_config_is_a_single_source_of_truth_not_duplicated_stri
     changing them alone changes every derived attribute (model name,
     instruction, dimension) with no other setting to keep in sync.
     """
-    settings = Settings(embedding_model_key="qwen3-0.6b", embedding_output_dimension=768)
+    settings = Settings(
+        _env_file=None,
+        embedding_provider="ollama",
+        embedding_model_key="qwen3-0.6b",
+        embedding_output_dimension=768,
+    )
 
     config = active_embedding_config(settings)
 
     assert config.ollama_model == settings.qwen3_0_6b_embed_model
     assert config.dimension == 768
+
+
+def test_active_embedding_config_uses_siliconflow_transport_identity():
+    settings = Settings(
+        _env_file=None,
+        embedding_provider="siliconflow",
+        siliconflow_embed_model="Qwen/Qwen3-Embedding-4B",
+        embedding_model_key="qwen3-4b",
+        embedding_output_dimension=1024,
+    )
+
+    config = active_embedding_config(settings)
+
+    assert config.ollama_model == "Qwen/Qwen3-Embedding-4B"
+    assert config.backend == "siliconflow"
+    assert config.revision == "siliconflow-api"
+    assert config.dimension == 1024

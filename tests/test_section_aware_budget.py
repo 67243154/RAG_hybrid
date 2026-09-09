@@ -55,6 +55,59 @@ async def test_over_budget_anchors_are_preserved_within_global_budget() -> None:
     assert result.budget_exhausted is True
 
 
+@pytest.mark.asyncio
+async def test_rank_one_anchor_survives_head_truncation_of_merged_section() -> None:
+    """Porton handbook §3.8 regression: when two anchors share a section and
+    the merged block is over budget, head truncation must cut the
+    lower-ranked (document-earlier) anchor, never the rank-1 anchor whose
+    text is otherwise discarded entirely."""
+    answer = chunk("answer", "病假条款 " * 20, "handbook")  # rank 1, 20 tokens
+    answer.payload["page_number"] = 2
+    large = chunk("large", "年假一般规则 " * 200, "handbook")  # rank 2, 200 tokens
+    large.payload["page_number"] = 1
+    toc = chunk("toc", "目录 " * 100, "handbook")  # other section, 100 tokens
+    toc.payload["heading_path"] = ["目录章节"]
+
+    builder = SectionAwareEvidenceBuilder.__new__(SectionAwareEvidenceBuilder)
+    builder._token_budget = 300  # 220 + 100 > 300 -> merged group truncated
+    builder._scroll_source = lambda anchor, context: [large, answer]
+
+    result = await builder.build(
+        [answer, large, toc], RetrievalContext("tenant-a")
+    )
+
+    merged = next(
+        block
+        for block in result.blocks
+        if block.payload["contributing_chunk_ids"] == ["answer", "large"]
+    )
+    text = merged.payload["text"]
+    assert text.startswith("病假条款")  # rank-1 anchor leads the block
+    assert "病假条款 病假条款 病假条款" in text  # rank-1 anchor fully preserved
+    assert merged.payload["truncated"] is True  # the large rank-2 anchor was cut
+    assert result.context_tokens <= 300
+
+
+@pytest.mark.asyncio
+async def test_expansion_chunks_follow_anchors_regardless_of_document_order() -> None:
+    """Phase B expansions join after the reranked anchors even when they sit
+    earlier in the document, so anchor content always leads the block."""
+    answer = chunk("answer", "答案要点 " * 10, "handbook")
+    answer.payload["page_number"] = 2
+    preamble = chunk("preamble", "章节前言 " * 30, "handbook")
+    preamble.payload["page_number"] = 0  # document-earliest, NOT an anchor
+
+    builder = SectionAwareEvidenceBuilder.__new__(SectionAwareEvidenceBuilder)
+    builder._token_budget = 400  # everything fits, no truncation
+    builder._scroll_source = lambda anchor, context: [preamble, answer]
+
+    result = await builder.build([answer], RetrievalContext("tenant-a"))
+
+    assert len(result.blocks) == 1
+    assert result.blocks[0].payload["contributing_chunk_ids"] == ["answer", "preamble"]
+    assert result.blocks[0].payload["text"].startswith("答案要点")
+
+
 def test_duplicate_chunks_are_deduplicated_deterministically() -> None:
     items = [chunk("a", "same", "source-a"), chunk("a", "same", "source-a")]
     assert [item.id for item in SectionAwareEvidenceBuilder._unique_chunks(items)] == ["a"]

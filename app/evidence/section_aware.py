@@ -200,6 +200,20 @@ class SectionAwareEvidenceBuilder:
         return result
 
     @staticmethod
+    def _unique_anchors(chunks: list[SearchResult]) -> list[SearchResult]:
+        """Dedupe anchors keeping their given (rerank-rank) order — the first
+        occurrence of a duplicate is by definition the highest-ranked one."""
+        result: list[SearchResult] = []
+        seen: set[tuple[str, str]] = set()
+        for item in chunks:
+            identity = (_chunk_id(item), str(item.payload.get("text", "")))
+            if identity in seen:
+                continue
+            seen.add(identity)
+            result.append(item)
+        return result
+
+    @staticmethod
     def _truncate_block(block: SearchResult, token_limit: int) -> SearchResult:
         """Truncate only content, retaining the block's provenance metadata."""
         text = str(block.payload.get("text", ""))
@@ -240,7 +254,16 @@ class SectionAwareEvidenceBuilder:
 
     @staticmethod
     def _block(anchor: SearchResult, section_chunks: list[SearchResult]) -> SearchResult:
-        ordered = sorted(section_chunks, key=_sort_key)
+        # section_chunks arrives pre-ordered by the caller: reranked anchors
+        # first (highest rank = first), then document-ordered expansion
+        # chunks. Budget truncation keeps the HEAD of the joined text, so this
+        # order is what protects rank-1 anchor content from being cut first;
+        # re-sorting by document position here would silently reintroduce the
+        # failure where the most relevant chunk is truncated away (observed
+        # on the Porton handbook §3.8 sick-leave question: the rank-1
+        # overflow chunk was fully discarded because the 512-token rank-2
+        # chunk preceded it in document order).
+        ordered = list(section_chunks)
         ids = [_chunk_id(item) for item in ordered]
         text = "\n\n".join(str(item.payload.get("text", "")) for item in ordered)
         anchor_payload = dict(anchor.payload)
@@ -322,7 +345,12 @@ class SectionAwareEvidenceBuilder:
             # A provider/storage race must not erase an anchor from the
             # model-visible evidence boundary.
             group["points"] = self._unique_chunks(points + group["anchors"])
-            group["selected"] = self._unique_chunks(group["anchors"])
+            # Rerank-rank order, NOT document order: group["anchors"] lists
+            # anchors highest-rank-first, and head truncation of an
+            # over-budget block keeps only the leading text — so the
+            # highest-ranked anchor must come first in the joined block or
+            # it is the first content lost (Porton handbook §3.8 regression).
+            group["selected"] = self._unique_anchors(group["anchors"])
 
         # Phase A: reserve anchor content fairly.  If all anchors fit, no
         # truncation is needed.  Otherwise each source group receives an

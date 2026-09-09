@@ -113,7 +113,8 @@ def test_empty_structural_features_are_nullable():
     assert all(value is None for value in structural.as_dict().values())
 
 
-def test_reference_export_profile_uses_candidate_k_20_even_when_dev_fast_is_15():
+def test_reference_export_profile_uses_candidate_k_20_even_when_dev_fast_is_15(monkeypatch):
+    monkeypatch.delenv("RERANKER_CANDIDATE_K", raising=False)
     settings = Settings(_env_file=None)
     snapshot = _config_snapshot(
         settings,

@@ -132,7 +132,7 @@ describe("Evidence Inspector", () => {
           trace_id: "t1",
           available: true,
           jaeger_url: "http://jaeger",
-          spans: [{ name: "chat_request", duration_ms: 10, offset_ms: 0 }],
+          spans: [{ name: "chat_request", duration_ms: 10, offset_ms: 0, depth: 0 }],
         }}
       />,
     )

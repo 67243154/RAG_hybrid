@@ -227,7 +227,10 @@ async def ingest_connector(
 
     with tracer.start_as_current_span("ingest_connector") as sync_span:
         sync_span.set_attribute("ingest.source_type", connector.source_type)
-        store.ensure_collection()
+        # Untraced, this ~45ms Qdrant round trip left a large hole between
+        # the sync root and fetch_documents in the waterfall timeline.
+        with tracer.start_as_current_span("ensure_collection"):
+            store.ensure_collection()
 
         files_processed = 0
         chunks_upserted = 0

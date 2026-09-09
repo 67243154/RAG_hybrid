@@ -70,7 +70,11 @@ async def _index(
 
 
 def test_no_migration_required_when_fingerprints_match(tmp_path):
-    settings = Settings(embedding_model_key="nomic", embedding_output_dimension=None)
+    settings = Settings(
+        embedding_provider="ollama",
+        embedding_model_key="nomic",
+        embedding_output_dimension=None,
+    )
     client = QdrantClient(":memory:")
     registry = DocumentRegistry(tmp_path / "registry.db")
     # Bootstrapping: mark the (nomic) source as already "active" at the

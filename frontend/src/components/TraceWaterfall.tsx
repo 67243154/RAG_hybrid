@@ -15,6 +15,12 @@ export function TraceWaterfall({ trace }: { trace: TraceDetail }) {
     )
   }
 
+  // Sequence-number spans whose name repeats (e.g. 向量化批次 ×4) so the
+  // rows read as iterations rather than accidental duplicates.
+  const nameCounts = new Map<string, number>()
+  for (const span of trace.spans) nameCounts.set(span.name, (nameCounts.get(span.name) ?? 0) + 1)
+  const seen = new Map<string, number>()
+
   const totalMs = Math.max(...trace.spans.map((s) => s.offset_ms + s.duration_ms))
 
   return (
@@ -22,10 +28,16 @@ export function TraceWaterfall({ trace }: { trace: TraceDetail }) {
       {trace.spans.map((span) => {
         const leftPct = (span.offset_ms / totalMs) * 100
         const widthPct = Math.max((span.duration_ms / totalMs) * 100, 0.5)
+
+        const count = nameCounts.get(span.name) ?? 1
+        const index = (seen.get(span.name) ?? 0) + 1
+        seen.set(span.name, index)
+        const label = count > 1 ? `${displayLabel(span.name)} ${index}` : displayLabel(span.name)
+
         return (
-          <div key={`${displayLabel(span.name)}-${span.offset_ms}`} className="flex items-center gap-3">
+          <div key={`${span.name}-${span.offset_ms}-${index}`} className="flex items-center gap-3">
             <span className="w-40 shrink-0 truncate text-xs text-[var(--color-foreground)]">
-              {displayLabel(span.name)}
+              {label}
             </span>
             <div className="relative h-4 flex-1 rounded bg-[var(--color-surface-raised)]">
               <div

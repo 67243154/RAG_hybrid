@@ -2,8 +2,9 @@ from app.shared.config import Settings
 from app.sync.scheduler import sync_intervals_from_settings
 
 
-def test_includes_filesystem_by_default():
-    intervals = sync_intervals_from_settings(Settings())
+def test_includes_filesystem_by_default(monkeypatch):
+    monkeypatch.delenv("FILESYSTEM_SYNC_INTERVAL_SECONDS", raising=False)
+    intervals = sync_intervals_from_settings(Settings(_env_file=None))
 
     assert intervals["filesystem"] == 300.0
 

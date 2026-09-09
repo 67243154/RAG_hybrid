@@ -9,6 +9,8 @@ class SpanSummary:
     name: str
     duration_ms: float
     start_time_us: int
+    span_id: str = ""
+    parent_span_id: str | None = None
 
 
 def _parse_spans(payload: dict) -> list[SpanSummary]:
@@ -16,12 +18,21 @@ def _parse_spans(payload: dict) -> list[SpanSummary]:
     if not traces:
         return []
     spans = traces[0].get("spans") or []
+
+    def _parent(raw: dict) -> str | None:
+        for ref in raw.get("references") or []:
+            if ref.get("refType") == "CHILD_OF":
+                return ref.get("spanID")
+        return None
+
     return sorted(
         (
             SpanSummary(
                 name=s["operationName"],
                 duration_ms=s["duration"] / 1000,
                 start_time_us=s["startTime"],
+                span_id=s.get("spanID", ""),
+                parent_span_id=_parent(s),
             )
             for s in spans
         ),
@@ -29,7 +40,12 @@ def _parse_spans(payload: dict) -> list[SpanSummary]:
     )
 
 
-_ROOT_SPAN_NAME = "chat_request"
+# Root spans that close last for their trace kind — "chat_request" for
+# chat traces (app/api/chat.py), "sync_run" for sync traces
+# (app/sync/manager.py, one trace per run per ADR 0004). Presence of the
+# kind's root span, not just "some spans exist", is the signal the trace
+# is fully indexed.
+_ROOT_SPAN_NAMES = frozenset({"chat_request", "sync_run"})
 
 
 def fetch_trace_spans(
@@ -45,10 +61,10 @@ def fetch_trace_spans(
 
     A trace can appear PARTIALLY indexed (Jaeger's OTLP ingestion is async
     and batched) — some child spans flushed while the last-closing span
-    hasn't been exported yet. `chat_request` (the root span) is
-    guaranteed to close last, so its presence, not just "some spans
-    exist", is the signal the trace is fully indexed. See
-    docs/adr/0004-single-trace-per-sync-run.md. Retries a bounded number
+    hasn't been exported yet. The root span (chat_request for chat traces,
+    sync_run for sync traces) is guaranteed to close last, so its presence,
+    not just "some spans exist", is the signal the trace is fully indexed.
+    See docs/adr/0004-single-trace-per-sync-run.md. Retries a bounded number
     of times with a short delay rather than failing immediately or
     polling forever; returns an empty list (not an exception) if the
     trace never appears, so the UI can show a clear "not indexed yet"
@@ -61,7 +77,7 @@ def fetch_trace_spans(
             response = client.get(f"/api/traces/{trace_id}")
             response.raise_for_status()
             spans = _parse_spans(response.json())
-            if any(s.name == _ROOT_SPAN_NAME for s in spans):
+            if any(s.name in _ROOT_SPAN_NAMES for s in spans):
                 return spans
             if attempt < max_attempts - 1:
                 time.sleep(retry_delay_seconds)

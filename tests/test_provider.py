@@ -11,6 +11,7 @@ from app.llm.provider import (
     get_chat_provider,
     get_embedding_provider,
 )
+from app.llm.siliconflow_embedding import SiliconFlowEmbeddingClient
 from app.shared.config import Settings
 
 
@@ -68,13 +69,20 @@ def test_default_embed_model_follows_the_active_embedding_model_key():
     # single source of truth is embedding_model_key/
     # embedding_output_dimension. Production default is now qwen3-4b
     # (docs/PLANNING.md Sprint 21/22 closing notes).
-    settings = Settings(generation_provider="claude")
+    settings = Settings(
+        _env_file=None, generation_provider="claude", embedding_provider="ollama"
+    )
 
     assert default_embed_model(settings) == settings.qwen3_embed_model
 
 
 def test_default_embed_model_switches_when_embedding_model_key_is_nomic():
-    settings = Settings(embedding_model_key="nomic", ollama_embed_model="nomic-embed-text")
+    settings = Settings(
+        _env_file=None,
+        embedding_provider="ollama",
+        embedding_model_key="nomic",
+        ollama_embed_model="nomic-embed-text",
+    )
 
     assert default_embed_model(settings) == "nomic-embed-text"
 
@@ -133,8 +141,41 @@ def test_get_chat_provider_raises_when_openai_selected_without_api_key():
 
 
 def test_get_embedding_provider_returns_ollama_provider():
-    settings = Settings()
+    settings = Settings(_env_file=None, embedding_provider="ollama")
 
     provider = get_embedding_provider(settings)
 
     assert isinstance(provider, OllamaProvider)
+
+
+def test_get_embedding_provider_returns_siliconflow_provider_when_configured():
+    settings = Settings(
+        _env_file=None,
+        embedding_provider="siliconflow",
+        siliconflow_api_key="test-key",
+    )
+
+    provider = get_embedding_provider(settings)
+
+    assert isinstance(provider, SiliconFlowEmbeddingClient)
+
+
+def test_get_embedding_provider_requires_siliconflow_api_key():
+    settings = Settings(
+        _env_file=None,
+        embedding_provider="siliconflow",
+        siliconflow_api_key=None,
+    )
+
+    with pytest.raises(ValueError, match="siliconflow_api_key"):
+        get_embedding_provider(settings)
+
+
+def test_default_embed_model_uses_siliconflow_model_name():
+    settings = Settings(
+        _env_file=None,
+        embedding_provider="siliconflow",
+        siliconflow_embed_model="Qwen/Qwen3-Embedding-4B",
+    )
+
+    assert default_embed_model(settings) == "Qwen/Qwen3-Embedding-4B"

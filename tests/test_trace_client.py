@@ -97,6 +97,29 @@ def test_fetch_trace_spans_keeps_retrying_when_root_span_is_missing():
     ]
 
 
+def test_fetch_trace_spans_accepts_sync_run_as_root_span():
+    """The /traces page lists sync-run traces (Traces.tsx pulls trace_ids
+    from sync run history). A sync trace's last-closing span is sync_run,
+    not chat_request — before this fix such traces always came back empty
+    and the page showed "链路尚未完成索引" for every sync run.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_jaeger_response(
+                [_span("sync_run", 90, 2000), _span("fetch_documents", 100, 500)]
+            ),
+        )
+
+    result = fetch_trace_spans(_TRACE_ID, client=_client_for(handler), max_attempts=1)
+
+    assert result == [
+        SpanSummary(name="sync_run", duration_ms=2.0, start_time_us=90),
+        SpanSummary(name="fetch_documents", duration_ms=0.5, start_time_us=100),
+    ]
+
+
 def test_fetch_trace_spans_gives_up_after_max_attempts_without_raising():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=_jaeger_response([]))

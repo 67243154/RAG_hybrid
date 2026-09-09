@@ -995,275 +995,278 @@ async def stream_support_unit_answer(
     architecture_v2_shadow_enabled: bool = False,
 ):
     """Generate an answer whose citations are request-scoped support IDs."""
-    units = build_support_units(blocks)
-    capture = current_capture()
-    if capture is not None:
-        capture.stage(
-            "generation",
-            {
-                "provider_model": model,
-                "structured_output": True,
-                "support_id_contract_enabled": True,
-                "support_units": metadata_for_support_units(units),
-                "input_evidence_count": len(units),
-            },
-        )
-    yield {
-        "type": "metadata",
-        "prompt_version": prompt_version,
-        "pipeline_version": SUPPORT_ID_PIPELINE_VERSION,
-        "output_contract_version": SUPPORT_ID_OUTPUT_CONTRACT_VERSION,
-    }
-    messages = build_messages(
-        query,
-        units,
-        version=prompt_version,
-        context_serializer=context_serializer,
-        system_prompt_suffix=SUPPORT_ID_OUTPUT_INSTRUCTIONS,
-        support_id_contract=True,
-    )
-    generation_kwargs = {
-        "model": model,
-        "think": think,
-        "temperature": 0.0,
-        # Keep the original exact enum contract.  The reliability fix bounds
-        # runaway JSON generation; application membership validation remains
-        # authoritative.
-        "schema": support_unit_output_schema_state_machine(units),
-        "num_ctx": num_ctx,
-        "num_predict": SUPPORT_ID_MAX_OUTPUT_TOKENS,
-    }
-    if seed is not None:
-        generation_kwargs["seed"] = seed
-    generation_started = time.perf_counter()
-    raw = ""
-    parsed = None
-    request_messages = messages
-    for attempt in range(2):
-        try:
-            raw = await provider.chat_json(request_messages, **generation_kwargs)
-        except Exception:
-            if attempt == 0:
-                continue
-            yield {
-                "type": "error",
-                "message": "答案生成服务调用失败，请稍后重试。",
-            }
-            return
-        try:
-            parsed = parse_support_unit_state_machine_answer(raw)
-            break
-        except (ValueError, json.JSONDecodeError):
-            if attempt == 0:
-                request_messages = [
-                    *messages,
-                    {"role": "assistant", "content": raw},
-                    {
-                        "role": "user",
-                        "content": (
-                            "上一条回复不符合要求的 JSON Schema。"
-                            "请重新作答，只返回符合 result 状态结构的 JSON，"
-                            "不要添加解释、Markdown 或代码块。"
-                        ),
-                    },
-                ]
-    generation_ms = round((time.perf_counter() - generation_started) * 1000, 3)
-    if parsed is None:
-        validation = SupportUnitValidation(
-            None,
-            [],
-            [],
-            ["TOP_LEVEL_SCHEMA_INVALID"],
-            False,
-            False,
-            True,
-            {"version": validator_version, "shadow_enabled": shadow_enabled},
-        )
-    else:
-        try:
-            validation = validate_support_unit_answer(
-                parsed,
-                units,
-                validator_version=validator_version,
-                shadow_enabled=shadow_enabled,
-                architecture_v2_shadow_enabled=architecture_v2_shadow_enabled,
+    # Match the original generation span: preparation, provider retries,
+    # validation and answer delivery are one real timed operation.
+    with get_tracer(__name__).start_as_current_span("generate"):
+        units = build_support_units(blocks)
+        capture = current_capture()
+        if capture is not None:
+            capture.stage(
+                "generation",
+                {
+                    "provider_model": model,
+                    "structured_output": True,
+                    "support_id_contract_enabled": True,
+                    "support_units": metadata_for_support_units(units),
+                    "input_evidence_count": len(units),
+                },
             )
-        except Exception:
-            parsed = None
+        yield {
+            "type": "metadata",
+            "prompt_version": prompt_version,
+            "pipeline_version": SUPPORT_ID_PIPELINE_VERSION,
+            "output_contract_version": SUPPORT_ID_OUTPUT_CONTRACT_VERSION,
+        }
+        messages = build_messages(
+            query,
+            units,
+            version=prompt_version,
+            context_serializer=context_serializer,
+            system_prompt_suffix=SUPPORT_ID_OUTPUT_INSTRUCTIONS,
+            support_id_contract=True,
+        )
+        generation_kwargs = {
+            "model": model,
+            "think": think,
+            "temperature": 0.0,
+            # Keep the original exact enum contract.  The reliability fix bounds
+            # runaway JSON generation; application membership validation remains
+            # authoritative.
+            "schema": support_unit_output_schema_state_machine(units),
+            "num_ctx": num_ctx,
+            "num_predict": SUPPORT_ID_MAX_OUTPUT_TOKENS,
+        }
+        if seed is not None:
+            generation_kwargs["seed"] = seed
+        generation_started = time.perf_counter()
+        raw = ""
+        parsed = None
+        request_messages = messages
+        for attempt in range(2):
+            try:
+                raw = await provider.chat_json(request_messages, **generation_kwargs)
+            except Exception:
+                if attempt == 0:
+                    continue
+                yield {
+                    "type": "error",
+                    "message": "答案生成服务调用失败，请稍后重试。",
+                }
+                return
+            try:
+                parsed = parse_support_unit_state_machine_answer(raw)
+                break
+            except (ValueError, json.JSONDecodeError):
+                if attempt == 0:
+                    request_messages = [
+                        *messages,
+                        {"role": "assistant", "content": raw},
+                        {
+                            "role": "user",
+                            "content": (
+                                "上一条回复不符合要求的 JSON Schema。"
+                                "请重新作答，只返回符合 result 状态结构的 JSON，"
+                                "不要添加解释、Markdown 或代码块。"
+                            ),
+                        },
+                    ]
+        generation_ms = round((time.perf_counter() - generation_started) * 1000, 3)
+        if parsed is None:
             validation = SupportUnitValidation(
                 None,
                 [],
                 [],
-                ["CRITICAL_VALIDATOR_INFRASTRUCTURE_FAILURE"],
+                ["TOP_LEVEL_SCHEMA_INVALID"],
                 False,
                 False,
                 True,
+                {"version": validator_version, "shadow_enabled": shadow_enabled},
+            )
+        else:
+            try:
+                validation = validate_support_unit_answer(
+                    parsed,
+                    units,
+                    validator_version=validator_version,
+                    shadow_enabled=shadow_enabled,
+                    architecture_v2_shadow_enabled=architecture_v2_shadow_enabled,
+                )
+            except Exception:
+                parsed = None
+                validation = SupportUnitValidation(
+                    None,
+                    [],
+                    [],
+                    ["CRITICAL_VALIDATOR_INFRASTRUCTURE_FAILURE"],
+                    False,
+                    False,
+                    True,
+                    {
+                        "version": validator_version,
+                        "shadow_enabled": shadow_enabled,
+                        "architecture_v2_shadow_enabled": architecture_v2_shadow_enabled,
+                        "invocations": 0,
+                        "pass": 0,
+                        "reject": 0,
+                        "indeterminate": 0,
+                        "forced_abstain": True,
+                        "reason_classes": ["CRITICAL_VALIDATOR_INFRASTRUCTURE_FAILURE"],
+                        "shadow_errors": 0,
+                        "shadow_error_classes": [],
+                        "shadow_disagreements": [],
+                        "architecture_v2_shadow_errors": 0,
+                        "architecture_v2_shadow_executed": False,
+                        "architecture_v2_shadow_architecture_id": None,
+                        "architecture_v2_shadow_occurrence_count": 0,
+                        "architecture_v2_shadow_validate_role_count": 0,
+                        "architecture_v2_shadow_skip_rejected_premise_count": 0,
+                        "architecture_v2_shadow_ambiguous_keep_validating_count": 0,
+                        "architecture_v2_shadow_duration_ms": 0.0,
+                        "architecture_v2_shadow_outcomes": [],
+                        "architecture_v2_shadow_disagreements": [],
+                    },
+                )
+        final_abstain = validation.model_abstain or validation.application_abstain
+        telemetry = validation.validator_telemetry
+        if capture is not None:
+            parsed_payload = (
                 {
-                    "version": validator_version,
-                    "shadow_enabled": shadow_enabled,
-                    "architecture_v2_shadow_enabled": architecture_v2_shadow_enabled,
-                    "invocations": 0,
-                    "pass": 0,
-                    "reject": 0,
-                    "indeterminate": 0,
-                    "forced_abstain": True,
-                    "reason_classes": ["CRITICAL_VALIDATOR_INFRASTRUCTURE_FAILURE"],
-                    "shadow_errors": 0,
-                    "shadow_error_classes": [],
-                    "shadow_disagreements": [],
-                    "architecture_v2_shadow_errors": 0,
-                    "architecture_v2_shadow_executed": False,
-                    "architecture_v2_shadow_architecture_id": None,
-                    "architecture_v2_shadow_occurrence_count": 0,
-                    "architecture_v2_shadow_validate_role_count": 0,
-                    "architecture_v2_shadow_skip_rejected_premise_count": 0,
-                    "architecture_v2_shadow_ambiguous_keep_validating_count": 0,
-                    "architecture_v2_shadow_duration_ms": 0.0,
-                    "architecture_v2_shadow_outcomes": [],
-                    "architecture_v2_shadow_disagreements": [],
+                    "answer_parts": [
+                        {"text": part.text, "support_ids": list(part.support_ids)}
+                        for part in parsed.answer_parts
+                    ],
+                    "abstain": parsed.abstain,
+                }
+                if parsed
+                else None
+            )
+            model_support_ids = (
+                [
+                    item
+                    for part in parsed_payload["answer_parts"]
+                    for item in part["support_ids"]
+                ]
+                if parsed_payload
+                else []
+            )
+            accepted_ids = [
+                item for part in validation.valid_parts for item in part.support_ids
+            ]
+            rejected_ids = [
+                item for part in validation.rejected_parts for item in part.get("support_ids", [])
+            ]
+            capture.merge_stage(
+                "generation",
+                {
+                    "structured_output_parse_status": "PARSED" if parsed else "INVALID",
+                    "generation_ms": generation_ms,
+                    "model_support_ids": model_support_ids,
+                    "raw_model_output": raw,
+                    "parsed_model_result": parsed_payload,
                 },
             )
-    final_abstain = validation.model_abstain or validation.application_abstain
-    telemetry = validation.validator_telemetry
-    if capture is not None:
-        parsed_payload = (
-            {
-                "answer_parts": [
-                    {"text": part.text, "support_ids": list(part.support_ids)}
-                    for part in parsed.answer_parts
-                ],
-                "abstain": parsed.abstain,
-            }
-            if parsed
-            else None
-        )
-        model_support_ids = (
-            [
-                item
-                for part in parsed_payload["answer_parts"]
-                for item in part["support_ids"]
+            capture.stage(
+                "support_id_validation",
+                {
+                    "requested_support_ids": model_support_ids,
+                    "accepted_support_ids": accepted_ids,
+                    "rejected_support_ids": rejected_ids,
+                    "reason_classes": validation.failure_codes,
+                    "unknown_support_count": validation.failure_codes.count("UNKNOWN_SUPPORT_ID"),
+                    "unauthorized_support_count": validation.failure_codes.count(
+                        "UNAUTHORIZED_SUPPORT_ID"
+                    ),
+                    "hidden_support_count": validation.failure_codes.count("HIDDEN_SUPPORT_ID"),
+                    "critical_validator": telemetry,
+                    "pre_validation_model_result": {
+                        "parsed": bool(parsed),
+                        "model_abstain": validation.model_abstain,
+                    },
+                    "post_validation_result": {
+                        "application_abstain": validation.application_abstain,
+                        "forced_abstain": validation.application_abstain
+                        and not validation.model_abstain,
+                        "outcome": "UNAVAILABLE" if final_abstain else "ANSWER",
+                    },
+                },
+            )
+            capture.stage(
+                "citation_resolution",
+                {
+                    "model_support_ids": model_support_ids,
+                    "validated_support_ids": accepted_ids,
+                    "application_citation_ids": accepted_ids,
+                    "resolved_citation_ids": accepted_ids,
+                    "rejected_citation_ids": rejected_ids,
+                    "model_citation_like_text_present": bool(
+                        parsed
+                        and any("[s." in part.text for part in parsed.answer_parts)
+                    ),
+                },
+            )
+        _record_validator_telemetry(telemetry)
+        rendered = render_support_unit_answer(validation.valid_parts, abstain=final_abstain)
+        user_visible = validation.top_level_valid and bool(rendered)
+        if capture is not None:
+            capture.set_visible_outcome(
+                {
+                    "outcome": "ANSWER" if user_visible else "UNAVAILABLE",
+                    "citation_count": len(accepted_ids),
+                    "support_id_count": len(accepted_ids),
+                    "raw_visible_text": rendered,
+                }
+            )
+        if evaluation_observation is not None:
+            evaluation_observation.raw_candidate_available = True
+            evaluation_observation.raw_candidate_output = raw
+            evaluation_observation.validator_input_available = True
+            evaluation_observation.validator_pass = (
+                validation.top_level_valid and not validation.failure_codes
+            )
+            evaluation_observation.validator_failure_codes = list(validation.failure_codes)
+            evaluation_observation.validated_output = rendered
+            evaluation_observation.validated_output_available = user_visible
+            evaluation_observation.user_visible_output_available = user_visible
+            evaluation_observation.pipeline_version = SUPPORT_ID_PIPELINE_VERSION
+            evaluation_observation.output_contract_version = SUPPORT_ID_OUTPUT_CONTRACT_VERSION
+            evaluation_observation.model_abstention = validation.model_abstain
+            evaluation_observation.application_forced_abstention = (
+                validation.application_abstain and not validation.model_abstain
+            )
+            evaluation_observation.structured_candidate = (
+                {
+                    "answer_parts": [
+                        {"text": part.text, "support_ids": list(part.support_ids)}
+                        for part in parsed.answer_parts
+                    ],
+                    "abstain": parsed.abstain,
+                }
+                if parsed
+                else None
+            )
+            evaluation_observation.validated_answer_parts = [
+                {"text": part.text, "support_ids": list(part.support_ids), "survived": True}
+                for part in validation.valid_parts
             ]
-            if parsed_payload
-            else []
-        )
-        accepted_ids = [
-            item for part in validation.valid_parts for item in part.support_ids
-        ]
-        rejected_ids = [
-            item for part in validation.rejected_parts for item in part.get("support_ids", [])
-        ]
-        capture.merge_stage(
-            "generation",
-            {
-                "structured_output_parse_status": "PARSED" if parsed else "INVALID",
-                "generation_ms": generation_ms,
-                "model_support_ids": model_support_ids,
-                "raw_model_output": raw,
-                "parsed_model_result": parsed_payload,
-            },
-        )
-        capture.stage(
-            "support_id_validation",
-            {
-                "requested_support_ids": model_support_ids,
-                "accepted_support_ids": accepted_ids,
-                "rejected_support_ids": rejected_ids,
-                "reason_classes": validation.failure_codes,
-                "unknown_support_count": validation.failure_codes.count("UNKNOWN_SUPPORT_ID"),
-                "unauthorized_support_count": validation.failure_codes.count(
-                    "UNAUTHORIZED_SUPPORT_ID"
-                ),
-                "hidden_support_count": validation.failure_codes.count("HIDDEN_SUPPORT_ID"),
-                "critical_validator": telemetry,
-                "pre_validation_model_result": {
-                    "parsed": bool(parsed),
-                    "model_abstain": validation.model_abstain,
-                },
-                "post_validation_result": {
-                    "application_abstain": validation.application_abstain,
-                    "forced_abstain": validation.application_abstain
-                    and not validation.model_abstain,
-                    "outcome": "UNAVAILABLE" if final_abstain else "ANSWER",
-                },
-            },
-        )
-        capture.stage(
-            "citation_resolution",
-            {
-                "model_support_ids": model_support_ids,
-                "validated_support_ids": accepted_ids,
-                "application_citation_ids": accepted_ids,
-                "resolved_citation_ids": accepted_ids,
-                "rejected_citation_ids": rejected_ids,
-                "model_citation_like_text_present": bool(
-                    parsed
-                    and any("[s." in part.text for part in parsed.answer_parts)
-                ),
-            },
-        )
-    _record_validator_telemetry(telemetry)
-    rendered = render_support_unit_answer(validation.valid_parts, abstain=final_abstain)
-    user_visible = validation.top_level_valid and bool(rendered)
-    if capture is not None:
-        capture.set_visible_outcome(
-            {
-                "outcome": "ANSWER" if user_visible else "UNAVAILABLE",
-                "citation_count": len(accepted_ids),
-                "support_id_count": len(accepted_ids),
-                "raw_visible_text": rendered,
+            evaluation_observation.rejected_answer_parts = validation.rejected_parts
+        if user_visible:
+            yield {"type": "token", "content": rendered}
+        else:
+            yield {
+                "type": "error",
+                "message": "模型返回的答案格式或校验异常，请重试。这不代表知识库没有相关资料。",
             }
-        )
-    if evaluation_observation is not None:
-        evaluation_observation.raw_candidate_available = True
-        evaluation_observation.raw_candidate_output = raw
-        evaluation_observation.validator_input_available = True
-        evaluation_observation.validator_pass = (
-            validation.top_level_valid and not validation.failure_codes
-        )
-        evaluation_observation.validator_failure_codes = list(validation.failure_codes)
-        evaluation_observation.validated_output = rendered
-        evaluation_observation.validated_output_available = user_visible
-        evaluation_observation.user_visible_output_available = user_visible
-        evaluation_observation.pipeline_version = SUPPORT_ID_PIPELINE_VERSION
-        evaluation_observation.output_contract_version = SUPPORT_ID_OUTPUT_CONTRACT_VERSION
-        evaluation_observation.model_abstention = validation.model_abstain
-        evaluation_observation.application_forced_abstention = (
-            validation.application_abstain and not validation.model_abstain
-        )
-        evaluation_observation.structured_candidate = (
-            {
-                "answer_parts": [
-                    {"text": part.text, "support_ids": list(part.support_ids)}
-                    for part in parsed.answer_parts
-                ],
-                "abstain": parsed.abstain,
-            }
-            if parsed
-            else None
-        )
-        evaluation_observation.validated_answer_parts = [
-            {"text": part.text, "support_ids": list(part.support_ids), "survived": True}
-            for part in validation.valid_parts
-        ]
-        evaluation_observation.rejected_answer_parts = validation.rejected_parts
-    if user_visible:
-        yield {"type": "token", "content": rendered}
-    else:
         yield {
-            "type": "error",
-            "message": "模型返回的答案格式或校验异常，请重试。这不代表知识库没有相关资料。",
+            "type": "security_validation",
+            "passed": user_visible,
+            "violations": list(validation.failure_codes),
+            "validator_failure_codes": list(validation.failure_codes),
+            "citation_suppressed": final_abstain,
+            "hidden_prompt_leaked": False,
+            "abstain": final_abstain,
+            "application_forced_abstention": validation.application_abstain
+            and not validation.model_abstain,
         }
-    yield {
-        "type": "security_validation",
-        "passed": user_visible,
-        "violations": list(validation.failure_codes),
-        "validator_failure_codes": list(validation.failure_codes),
-        "citation_suppressed": final_abstain,
-        "hidden_prompt_leaked": False,
-        "abstain": final_abstain,
-        "application_forced_abstention": validation.application_abstain
-        and not validation.model_abstain,
-    }
 
 
 def _quote_validation(evidence: EvidenceQuote, blocks: dict[str, SearchResult]) -> dict[str, Any]:

@@ -252,6 +252,7 @@ def test_ui_reports_the_injected_runtime_settings(tmp_path):
     docs_dir.mkdir()
     runtime_settings = Settings(
         _env_file=None,
+        generation_provider="ollama",
         reranker_model="custom/reranker",
         security_validation_mode="fast",
         ollama_model="custom/generation-model",
@@ -327,6 +328,99 @@ def test_trace_detail_queries_internal_jaeger_but_returns_public_url(tmp_path, m
     assert response.json()["available"] is True
     assert response.json()["jaeger_url"] == "http://localhost:16686"
     assert captured == {"trace_id": "abc123", "jaeger_url": "http://jaeger:16686"}
+
+
+def test_trace_detail_orders_spans_as_a_tree_with_depth(tmp_path, monkeypatch):
+    """The waterfall renders long parent bars interleaved with short
+    children as noise; the endpoint returns spans DFS-ordered with a depth
+    so the UI can indent children under their parents instead.
+    """
+
+    import app.ui.trace_client as trace_client_module
+
+    def fake_fetch(trace_id, **kwargs):
+        return [
+            trace_client_module.SpanSummary(
+                name="sync_run", duration_ms=1000.0, start_time_us=100,
+                span_id="root", parent_span_id=None,
+            ),
+            trace_client_module.SpanSummary(
+                name="fetch_documents", duration_ms=900.0, start_time_us=200,
+                span_id="doc", parent_span_id="root",
+            ),
+            trace_client_module.SpanSummary(
+                name="check_document", duration_ms=50.0, start_time_us=150,
+                span_id="check", parent_span_id="root",
+            ),
+            trace_client_module.SpanSummary(
+                name="embed_batch", duration_ms=400.0, start_time_us=300,
+                span_id="embed", parent_span_id="doc",
+            ),
+        ]
+
+    monkeypatch.setattr(trace_client_module, "fetch_trace_spans", fake_fetch)
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    client = _client(tmp_path, docs_dir)
+
+    response = client.get("/ui/traces/tree123", headers=_auth("token-user-a"))
+
+    assert response.status_code == 200
+    spans = response.json()["spans"]
+    assert [(s["name"], s["depth"]) for s in spans] == [
+        ("sync_run", 0),
+        ("check_document", 1),
+        ("fetch_documents", 1),
+        ("embed_batch", 2),
+    ]
+
+
+def test_trace_detail_collapses_wrapper_spans_and_promotes_children(tmp_path, monkeypatch):
+    """ingest_connector/ingest_document overlap the sync root bar at ~100%
+    and render as duplicate rows; they are hidden and their children
+    promoted so the waterfall shows only one top-level 同步任务 bar.
+    """
+
+    import app.ui.trace_client as trace_client_module
+
+    def fake_fetch(trace_id, **kwargs):
+        return [
+            trace_client_module.SpanSummary(
+                name="sync_run", duration_ms=1000.0, start_time_us=100,
+                span_id="root", parent_span_id=None,
+            ),
+            trace_client_module.SpanSummary(
+                name="ingest_connector", duration_ms=950.0, start_time_us=110,
+                span_id="conn", parent_span_id="root",
+            ),
+            trace_client_module.SpanSummary(
+                name="fetch_documents", duration_ms=10.0, start_time_us=150,
+                span_id="fd", parent_span_id="conn",
+            ),
+            trace_client_module.SpanSummary(
+                name="ingest_document", duration_ms=900.0, start_time_us=200,
+                span_id="doc", parent_span_id="conn",
+            ),
+            trace_client_module.SpanSummary(
+                name="embed_batch", duration_ms=400.0, start_time_us=300,
+                span_id="embed", parent_span_id="doc",
+            ),
+        ]
+
+    monkeypatch.setattr(trace_client_module, "fetch_trace_spans", fake_fetch)
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    client = _client(tmp_path, docs_dir)
+
+    response = client.get("/ui/traces/collapse123", headers=_auth("token-user-a"))
+
+    assert response.status_code == 200
+    spans = response.json()["spans"]
+    assert [(s["name"], s["depth"]) for s in spans] == [
+        ("sync_run", 0),
+        ("fetch_documents", 1),
+        ("embed_batch", 1),
+    ]
 
 
 def test_trace_detail_error_still_returns_public_jaeger_url(tmp_path, monkeypatch):

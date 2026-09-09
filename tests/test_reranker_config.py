@@ -18,7 +18,8 @@ def test_benchmark_configs_are_explicit_and_keep_candidate_contract():
     assert (multilingual.candidate_k, multilingual.top_n) == (20, 5)
 
 
-def test_runtime_profiles_keep_local_and_reference_candidate_budgets_distinct():
+def test_runtime_profiles_keep_local_and_reference_candidate_budgets_distinct(monkeypatch):
+    monkeypatch.delenv("RERANKER_CANDIDATE_K", raising=False)
     config = Settings(_env_file=None)
     assert config.reranker_enabled is True
     assert config.reranker_model == MULTILINGUAL_RERANKER_MODEL

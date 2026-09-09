@@ -466,6 +466,14 @@ async def evaluations(user: UserContext = Depends(get_current_user)) -> dict:
     }
 
 
+# Presentation-only: connector-scope (ingest_connector) and document-scope
+# (ingest_document) wrappers exist for backend observability (rollback
+# scoping, app/ingestion/ingest.py) but overlap the sync root bar at
+# ~100%, so the waterfall hides them and promotes their children — the
+# chart then shows 同步任务 once followed by every actual step.
+_COLLAPSED_SPAN_NAMES = frozenset({"ingest_connector", "ingest_document"})
+
+
 @router.get("/traces/{trace_id}")
 async def trace_detail(
     trace_id: str, request: Request, user: UserContext = Depends(get_current_user)
@@ -478,7 +486,7 @@ async def trace_detail(
     Only span NAMES and timings are returned; span attributes (which can
     carry question text) are deliberately not forwarded to the browser.
     """
-    from app.ui.trace_client import fetch_trace_spans
+    from app.ui.trace_client import SpanSummary, fetch_trace_spans
 
     settings = _runtime_settings(request)
     # The backend may need the in-network Docker service name to query
@@ -509,6 +517,41 @@ async def trace_detail(
         }
 
     origin = min(s.start_time_us for s in spans)
+
+    # DFS span tree: parents first, children indented under them in start-time
+    # order — a flat start-time list interleaves long parent bars with their
+    # short children, which reads as visual noise in the waterfall UI.
+    by_id = {s.span_id: s for s in spans if s.span_id}
+
+    def _effective_parent(span: SpanSummary) -> str | None:
+        # Walk past collapsed wrappers so their children attach to the
+        # nearest still-visible ancestor instead of becoming orphan roots.
+        parent = span.parent_span_id if span.parent_span_id in by_id else None
+        while parent is not None and by_id[parent].name in _COLLAPSED_SPAN_NAMES:
+            grandparent = by_id[parent].parent_span_id
+            parent = grandparent if grandparent in by_id else None
+        return parent
+
+    children: dict[str, list] = {}
+    roots: list = []
+    for s in spans:
+        if s.name in _COLLAPSED_SPAN_NAMES:
+            continue
+        parent = _effective_parent(s)
+        if parent is None:
+            roots.append(s)
+        else:
+            children.setdefault(parent, []).append(s)
+
+    ordered: list[tuple[SpanSummary, int]] = []
+
+    def _walk(spans_at_level: list, depth: int) -> None:
+        for s in sorted(spans_at_level, key=lambda x: x.start_time_us):
+            ordered.append((s, depth))
+            _walk(children.get(s.span_id, []), depth + 1)
+
+    _walk(roots, 0)
+
     return {
         "trace_id": trace_id,
         "available": True,
@@ -518,8 +561,9 @@ async def trace_detail(
                 "name": s.name,
                 "duration_ms": s.duration_ms,
                 "offset_ms": (s.start_time_us - origin) / 1000,
+                "depth": depth,
             }
-            for s in spans
+            for s, depth in ordered
         ],
     }
 

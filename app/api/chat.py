@@ -224,8 +224,12 @@ async def _sse_event_stream(
                 len(sufficiency.get("supporting_chunk_ids", [])),
             )
         if deps.evidence_fn is not None:
-            chunks = await deps.evidence_fn(anchor_chunks, context)
-            span.set_attribute("pipeline.evidence_block_count", len(chunks))
+            # Covers the wall-clock between search() returning (rerank span
+            # closes inside it) and generation starting — mostly the
+            # SectionAwareEvidenceBuilder's first-call tokenizer load.
+            with tracer.start_as_current_span("evidence_build") as evidence_span:
+                chunks = await deps.evidence_fn(anchor_chunks, context)
+                evidence_span.set_attribute("pipeline.evidence_block_count", len(chunks))
         token_counts = [chunk.payload.get("token_count") for chunk in chunks]
         report.context.update({
             "retrieved_chunk_count": len(chunks),

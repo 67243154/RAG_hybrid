@@ -118,10 +118,14 @@ class _FakeProvider:
     async def chat_json(self, messages, **kwargs):
         return json.dumps(
             {
-                "answer_parts": [
-                    {"text": "The limit is 120 requests per minute.", "support_ids": ["E1.S1"]}
-                ],
-                "abstain": False,
+                "result": {
+                    "answer_parts": [
+                        {
+                            "text": "The limit is 120 requests per minute.",
+                            "support_ids": ["E1.S1"],
+                        }
+                    ]
+                }
             }
         )
 

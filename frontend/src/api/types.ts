@@ -266,6 +266,8 @@ export interface TraceSpan {
   name: string
   duration_ms: number
   offset_ms: number
+  /** Nesting level under the trace's root span (0 = root). */
+  depth: number
 }
 
 export interface TraceDetail {
