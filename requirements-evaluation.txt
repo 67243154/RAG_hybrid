@@ -1,0 +1,6 @@
+-r requirements.txt
+
+# Offline evaluation only; these are intentionally excluded from the
+# production backend image and its dependency resolution path.
+deepeval==4.1.5
+pyarrow==20.0.0

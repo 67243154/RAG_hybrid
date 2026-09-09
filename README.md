@@ -339,6 +339,7 @@ Compose 后端通常运行在 `http://localhost:8000`，Qdrant 运行在 `6333` 
 确定性后端测试套件是默认验证路径，不会调用外部 provider：
 
 ```bash
+pip install -r requirements-evaluation.txt
 pytest -m "not ollama_e2e"
 ruff check app tests scripts
 ```
