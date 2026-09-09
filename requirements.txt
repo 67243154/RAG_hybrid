@@ -7,7 +7,6 @@ pydantic-settings==2.14.2
 pymupdf==1.25.2
 qdrant-client==1.12.1
 fastembed==0.8.0
-sentence-transformers==5.6.1
 # Sprint 27: explicit production-compatible tokenizer dependency for
 # Qwen3-Embedding-4B token-aware chunking (sentence-transformers also uses
 # this package transitively, but chunking imports it directly).

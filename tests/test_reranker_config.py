@@ -37,6 +37,47 @@ def test_reranker_can_be_disabled_without_constructing_model(monkeypatch):
     assert wiring.build_reranker(Settings(_env_file=None, reranker_enabled=False)) is None
 
 
+def test_siliconflow_reranker_is_built_without_loading_local_model(monkeypatch):
+    import app.wiring as wiring
+
+    captured = {}
+
+    def fake_siliconflow_reranker(*args, **kwargs):
+        captured.update(args=args, kwargs=kwargs)
+        return "remote-reranker"
+
+    monkeypatch.setattr(
+        wiring,
+        "CrossEncoderReranker",
+        lambda *args, **kwargs: pytest.fail("local model constructed"),
+    )
+    monkeypatch.setattr(wiring, "SiliconFlowReranker", fake_siliconflow_reranker)
+    settings = Settings(
+        _env_file=None,
+        reranker_backend="siliconflow",
+        siliconflow_api_key="test-key",
+    )
+
+    result = wiring.build_reranker(settings)
+
+    assert result == "remote-reranker"
+    assert captured["args"] == ("BAAI/bge-reranker-v2-m3",)
+    assert captured["kwargs"]["api_key"] == "test-key"
+
+
+def test_siliconflow_reranker_requires_api_key():
+    import app.wiring as wiring
+
+    settings = Settings(
+        _env_file=None,
+        reranker_backend="siliconflow",
+        siliconflow_api_key=None,
+    )
+
+    with pytest.raises(ValueError, match="siliconflow_api_key"):
+        wiring.build_reranker(settings)
+
+
 def test_cross_encoder_config_is_forwarded(monkeypatch):
     import app.reranker.cross_encoder as module
 

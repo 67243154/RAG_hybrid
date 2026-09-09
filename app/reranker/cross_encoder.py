@@ -1,14 +1,17 @@
 import asyncio
 import time
 from concurrent.futures import ThreadPoolExecutor
-
-from sentence_transformers import CrossEncoder
+from typing import Any
 
 from app.reranker.config import RERANKER_BACKEND
 from app.retrieval.hybrid_search import SearchResult
 
 # Model load and inference latency depend on the selected model and hardware;
 # see docs/reranking.md and artifacts/reranker-benchmark-sprint26/.
+
+# Keep the heavyweight local dependency out of the SiliconFlow server path.
+# Tests may replace this symbol with a fake before construction.
+CrossEncoder: Any = None
 
 
 class CrossEncoderReranker:
@@ -31,7 +34,17 @@ class CrossEncoderReranker:
         if device is not None:
             kwargs["device"] = device
         self.device = device
-        self._model = CrossEncoder(model_name, **kwargs)
+        encoder_class = CrossEncoder
+        if encoder_class is None:
+            try:
+                from sentence_transformers import CrossEncoder as encoder_class
+            except ImportError as exc:
+                raise RuntimeError(
+                    "Local reranking requires the optional sentence-transformers dependency; "
+                    "install requirements-reranker-local.txt or use "
+                    "RERANKER_BACKEND=siliconflow"
+                ) from exc
+        self._model = encoder_class(model_name, **kwargs)
 
     async def async_rerank(
         self, query: str, candidates: list[SearchResult], top_n: int

@@ -259,7 +259,7 @@ Architecture V2 是当前作品集运行时的默认验证器。该路径已经�
 
 - FastAPI 后端与 React RAG Operations Console。
 - 基于 Qdrant 的索引生命周期，支持 alias 激活和可感知回滚的同步。
-- 使用 DeepSeek 进行答案生成，通过 Ollama 托管 Qwen3 embedding。
+- 使用 DeepSeek 进行答案生成，通过硅基流动托管 Qwen3 embedding 和 BGE reranker。
 - 使用 OpenAI 兼容的结构化输出协议调用 DeepSeek；格式异常会自动重试一次，并与“证据不足”使用不同的中文提示。
 - 使用 SSE 交付答案，并由应用层解析引用；前端会跨网络分片保留完整事件，避免 `sources` 与 `data` 被拆包后丢失。
 
@@ -270,16 +270,15 @@ Architecture V2 是当前作品集运行时的默认验证器。该路径已经�
 - Python 3.11+
 - Docker Desktop 或兼容的 Docker Engine
 - Node.js 22 与 npm
-- 原生安装的 [Ollama](https://ollama.com)，用于本地 embedding
 - 用于答案生成的 DeepSeek API Key
+- 用于 embedding 和 reranker 的硅基流动 API Key
 
 ### 本地运行
 
 ```bash
 cp .env.example .env
-ollama pull qwen3-embedding:4b
 
-# 启动后端之前，请先在 .env 中设置 DEEPSEEK_API_KEY。
+# 启动后端之前，请先在 .env 中设置 DEEPSEEK_API_KEY 和 SILICONFLOW_API_KEY。
 
 docker compose up -d --build
 
@@ -288,9 +287,11 @@ npm ci
 npm run dev
 ```
 
-`docker compose` 必须在包含 `docker-compose.yml` 的项目目录中执行。`--build` 会根据当前目录中的 Compose 配置和 `Dockerfile` 重新构建后端镜像，并替换同一 Compose 项目下的 backend 容器；Python 依赖已经在镜像构建阶段安装。Ollama 仍运行在宿主机，不会被安装进 backend 容器。
+`docker compose` 必须在包含 `docker-compose.yml` 的项目目录中执行。`--build` 会根据当前目录中的 Compose 配置和 `Dockerfile` 重新构建后端镜像，并替换同一 Compose 项目下的 backend 容器；Python 依赖已经在镜像构建阶段安装。默认容器不再下载或加载本地稠密 embedding/reranker 模型（BM25 稀疏编码仍由 Qdrant/FastEmbed 路径提供）。
 
 只修改 `data/documents` 中的文档通常不需要重建镜像，重新同步知识库即可。修改 Python 后端、依赖或 Dockerfile 后执行 `docker compose up -d --build backend`；修改 React 前端后重新启动或构建前端。
+
+如需在宿主机恢复本地重排序，先执行 `pip install -r requirements-reranker-local.txt`，再设置 `RERANKER_BACKEND=sentence-transformers`。默认服务器镜像不包含这组重量级可选依赖。
 
 复制后的环境会默认启用基于证据的 support-unit 流程：
 `RAG_PIPELINE_V2=true`、`SUPPORT_IDS_ENABLED=true` 和
@@ -318,7 +319,8 @@ Compose 后端通常运行在 `http://localhost:8000`，Qdrant 运行在 `6333` 
 | `CRITICAL_VALIDATOR_ARCH_V2_SHADOW_ENABLED` | `false` | V2 诊断 shadow；默认关闭。 |
 | `CRITICAL_VALIDATOR_V3_SHADOW_ENABLED` | `false` | 可选的 V3 诊断 shadow。 |
 | `GENERATION_PROVIDER` / 模型设置 | DeepSeek / `deepseek-v4-flash` | 通过兼容 OpenAI 的 API 进行远程答案生成。 |
-| `EMBEDDING_MODEL_KEY` | `qwen3-4b` | 通过 Ollama 生成本地 embedding，并使用 1024 维 Qdrant 索引。 |
+| `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL_KEY` | SiliconFlow / `qwen3-4b` | 通过硅基流动生成 1024 维 embedding，并使用对应的 Qdrant 索引。 |
+| `RERANKER_BACKEND` / `RERANKER_MODEL` | SiliconFlow / `BAAI/bge-reranker-v2-m3` | 通过硅基流动 API 重排序，不在后端加载本地 CrossEncoder。 |
 | `RAG_FORENSIC_CAPTURE_ENABLED` | `false` | 启用受控本地元数据取证采集。 |
 | `RAG_FORENSIC_CAPTURE_RAW_TEXT` | `false` | 记录原始取证文本；永远不会进入常规 OTel。 |
 

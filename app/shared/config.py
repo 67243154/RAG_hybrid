@@ -160,7 +160,10 @@ class Settings(BaseSettings):
     # artifacts/reranker-benchmark-sprint26/report.md.
     reranker_enabled: bool = True
     reranker_model: str = MULTILINGUAL_RERANKER_MODEL
-    reranker_backend: Literal["sentence-transformers"] = RERANKER_BACKEND
+    reranker_backend: Literal["sentence-transformers", "siliconflow"] = RERANKER_BACKEND
+    siliconflow_rerank_connect_timeout_seconds: float = Field(default=10.0, gt=0)
+    siliconflow_rerank_read_timeout_seconds: float = Field(default=180.0, gt=0)
+    siliconflow_rerank_overall_timeout_seconds: float = Field(default=240.0, gt=0)
     # The global/reference value remains RERANKER_CANDIDATE_K (20). DEV_FAST
     # applies its measured local-iteration budget (15) unless an explicit
     # environment or constructor override pins another value.

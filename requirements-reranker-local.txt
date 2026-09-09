@@ -1,0 +1,5 @@
+-r requirements.txt
+
+# Optional local reranker backend. API-only server deployments do not need
+# sentence-transformers, PyTorch, or the local BGE model weights.
+sentence-transformers==5.6.1

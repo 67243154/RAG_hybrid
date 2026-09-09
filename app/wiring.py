@@ -31,6 +31,7 @@ from app.migration.readiness import check_readiness
 from app.migration.startup_guard import ensure_embedding_schema_match
 from app.registry.store import DocumentRegistry
 from app.reranker.cross_encoder import CrossEncoderReranker
+from app.reranker.siliconflow import SiliconFlowReranker
 from app.retrieval.hybrid_search import SearchResult
 from app.retrieval.report import RetrievalReport
 from app.retrieval.search import search
@@ -50,6 +51,20 @@ def build_reranker(settings: Settings):
     """Build the server-owned production reranker, or explicitly disable it."""
     if not settings.reranker_enabled:
         return None
+    if settings.reranker_backend == "siliconflow":
+        if not settings.siliconflow_api_key:
+            raise ValueError(
+                "settings.siliconflow_api_key must be set to use "
+                "reranker_backend='siliconflow'"
+            )
+        return SiliconFlowReranker(
+            settings.reranker_model,
+            api_key=settings.siliconflow_api_key,
+            base_url=settings.siliconflow_base_url,
+            connect_timeout=settings.siliconflow_rerank_connect_timeout_seconds,
+            timeout=settings.siliconflow_rerank_read_timeout_seconds,
+            overall_timeout=settings.siliconflow_rerank_overall_timeout_seconds,
+        )
     return CrossEncoderReranker(
         settings.reranker_model,
         trust_remote_code=settings.reranker_trust_remote_code,
@@ -96,6 +111,7 @@ def build_chat_dependencies(
     ollama: EmbeddingProvider,
     sparse_encoder: SparseEncoder,
     collection_name: str,
+    reranker_shutdown_hooks: list | None = None,
 ) -> tuple[ChatDependencies, ChatProvider]:
     """Curries real search()/stream_answer() calls into the two plain
     async callables ChatDependencies expects — the same shape
@@ -110,6 +126,8 @@ def build_chat_dependencies(
     caller can close it on shutdown too.
     """
     reranker = build_reranker(settings)
+    if reranker_shutdown_hooks is not None and hasattr(reranker, "aclose"):
+        reranker_shutdown_hooks.append(reranker.aclose)
     chat_provider = get_chat_provider(settings)
     embed_config = active_embedding_config(settings)
     semantic_evaluator = None
@@ -327,8 +345,14 @@ def build_app(settings: Settings) -> FastAPI:
         tenant_ids=tenant_ids,
         chunking_config=settings.chunking_config(),
     )
+    reranker_shutdown_hooks: list = []
     chat_deps, chat_provider = build_chat_dependencies(
-        settings, qdrant_client, embedding_provider, sparse_encoder, collection_name
+        settings,
+        qdrant_client,
+        embedding_provider,
+        sparse_encoder,
+        collection_name,
+        reranker_shutdown_hooks,
     )
     scheduler = SyncScheduler(manager, sync_intervals_from_settings(settings))
 
@@ -360,7 +384,12 @@ def build_app(settings: Settings) -> FastAPI:
     async def close_qdrant_client() -> None:
         qdrant_client.close()
 
-    on_shutdown = [embedding_provider.aclose, chat_provider.aclose, close_qdrant_client]
+    on_shutdown = [
+        embedding_provider.aclose,
+        chat_provider.aclose,
+        *reranker_shutdown_hooks,
+        close_qdrant_client,
+    ]
     for connector in connectors.values():
         if hasattr(connector, "aclose"):
             on_shutdown.append(connector.aclose)
