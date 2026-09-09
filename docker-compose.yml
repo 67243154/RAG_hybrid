@@ -56,6 +56,7 @@ services:
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
       - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
       - DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-v4-flash}
+      - HF_ENDPOINT=${HF_ENDPOINT:-https://hf-mirror.com}
       # The default compose stack is local development. Set APP_ENV=production
       # and provide explicit AUTH_TOKENS_JSON for a production-like deployment.
       - APP_ENV=${APP_ENV:-development}
@@ -80,6 +81,8 @@ services:
       # Survives `docker compose restart`/`stop`+`start`; only removed by
       # `down -v`.
       - registry_data:/app/data
+      # FastEmbed stores Qdrant/bm25 here; persist it across container rebuilds.
+      - fastembed_cache:/tmp/fastembed_cache
       # User-facing folder people drop real files into — a bind mount so
       # host-side edits are visible immediately, no volume indirection.
       - ./data/documents:/app/documents
@@ -102,3 +105,4 @@ volumes:
   qdrant_storage:
   registry_data:
   hf_cache:
+  fastembed_cache:

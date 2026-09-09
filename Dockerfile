@@ -9,7 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 # Production uses SiliconFlow reranking, so the image deliberately excludes
 # sentence-transformers, PyTorch, and local BGE weights.
-RUN pip install --no-cache-dir -r requirements.txt
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+RUN pip install --no-cache-dir --index-url ${PIP_INDEX_URL} -r requirements.txt
 
 COPY app/ ./app/
 COPY prompts/ ./prompts/
